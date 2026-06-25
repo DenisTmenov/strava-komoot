@@ -55,7 +55,6 @@ class KomootSink:
         headers = {"User-Agent": "StravaKomootSync"}
         params = {
             "sport": sport,
-            "status": status,
             "data_type": "gpx",
             "name": name,
         }
@@ -67,14 +66,13 @@ class KomootSink:
             params=params,
             data=gpx_xml.encode("utf-8"),
         )
-        if resp.status_code == 201:
+        if resp.status_code in (201, 202):
             tour_id = resp.json()["id"]
-            logger.info("Tour %s uploaded: %s", tour_id, name)
-            return UploadResult(tour_id=tour_id, status="synced")
-        elif resp.status_code == 202:
-            tour_id = resp.json()["id"]
-            logger.info("Tour %s already exists: %s", tour_id, name)
-            return UploadResult(tour_id=tour_id, status="already_present")
+            kind = "synced" if resp.status_code == 201 else "already_present"
+            logger.info("Tour %s %s: %s", tour_id, kind, name)
+            if status != "private":
+                self.update_meta(tour_id, status=status)
+            return UploadResult(tour_id=tour_id, status=kind)
         else:
             logger.error("Upload failed: %s %s", resp.status_code, resp.text)
             return UploadResult(tour_id=0, status="error")
