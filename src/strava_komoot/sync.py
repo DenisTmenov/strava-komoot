@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 import uuid
 from datetime import datetime, timezone
 from typing import Any
@@ -173,19 +174,130 @@ class SyncEngine:
 
     def start_job(self, job_type: str, activity_ids: list[int]) -> str:
         job_id = str(uuid.uuid4())[:8]
-        if job_type == "sync":
-            result = self.sync(activity_ids)
-        elif job_type == "apply":
-            result = self.apply(activity_ids)
-        else:
-            result = {"results": [{"id": aid, "status": "error", "error": f"unknown job type: {job_type}"} for aid in activity_ids]}
-
         self._jobs[job_id] = {
-            "status": "completed",
+            "status": "running",
             "type": job_type,
-            "result": result,
+            "total": len(activity_ids),
+            "current": 0,
+            "current_name": "",
+            "result": None,
         }
+        t = threading.Thread(target=self._run_job, args=(job_id, job_type, activity_ids), daemon=True)
+        t.start()
         return job_id
+
+    def _run_job(self, job_id: str, job_type: str, activity_ids: list[int]) -> None:
+        try:
+            if job_type == "sync":
+                result = self._sync_with_progress(job_id, activity_ids)
+            elif job_type == "apply":
+                result = self._apply_with_progress(job_id, activity_ids)
+            else:
+                result = {"results": [{"id": aid, "status": "error", "error": f"unknown job type: {job_type}"} for aid in activity_ids]}
+            self._jobs[job_id]["result"] = result
+            self._jobs[job_id]["status"] = "completed"
+        except Exception as e:
+            self._jobs[job_id]["status"] = "error"
+            self._jobs[job_id]["error"] = str(e)
+
+    def _sync_with_progress(self, job_id: str, activity_ids: list[int]) -> dict:
+        activities = {a.id: a for a in self.strava.list_activities() if a.id in activity_ids}
+        results = []
+
+        for idx, aid in enumerate(activity_ids):
+            activity = activities.get(aid)
+            name = activity.name if activity else str(aid)
+            self._jobs[job_id]["current"] = idx
+            self._jobs[job_id]["current_name"] = name
+
+            if activity is None:
+                results.append({"id": aid, "status": "error", "error": "activity not found"})
+                continue
+
+            try:
+                streams = self.strava.get_streams(aid)
+            except Exception as e:
+                results.append({"id": aid, "status": "error", "error": f"streams: {e}"})
+                continue
+
+            gpx_xml = build_gpx(activity, streams)
+            h = track_hash(streams)
+            sport = self.komoot.map_sport(activity.sport_type)
+            vis = self.komoot.map_visibility(activity.visibility)
+
+            try:
+                result = self.komoot.upload(gpx_xml, sport, activity.name, vis)
+            except Exception as e:
+                results.append({"id": aid, "status": "error", "error": f"upload: {e}"})
+                continue
+
+            snapshot = make_snapshot(activity, h)
+            self._repo.upsert(aid, result.tour_id, result.status, snapshot)
+            results.append({"id": aid, "status": result.status, "komoot_tour_id": result.tour_id})
+
+        self._jobs[job_id]["current"] = len(activity_ids)
+        return {"results": results}
+
+    def _apply_with_progress(self, job_id: str, activity_ids: list[int]) -> dict:
+        activities = {a.id: a for a in self.strava.list_activities() if a.id in activity_ids}
+        results = []
+
+        for idx, aid in enumerate(activity_ids):
+            activity = activities.get(aid)
+            name = activity.name if activity else str(aid)
+            self._jobs[job_id]["current"] = idx
+            self._jobs[job_id]["current_name"] = name
+
+            if activity is None:
+                results.append({"id": aid, "status": "error", "error": "activity not found"})
+                continue
+
+            record = self._repo.get(aid)
+            if record is None:
+                results.append({"id": aid, "status": "error", "error": "not synced yet"})
+                continue
+
+            old_snapshot = self._repo.get_snapshot(aid)
+            if old_snapshot is None:
+                results.append({"id": aid, "status": "error", "error": "no snapshot"})
+                continue
+
+            diff = activity_diff(activity, old_snapshot)
+
+            try:
+                streams = self.strava.get_streams(aid)
+            except Exception as e:
+                results.append({"id": aid, "status": "error", "error": f"streams: {e}"})
+                continue
+
+            new_hash = track_hash(streams)
+            track_changed = new_hash != old_snapshot.get("track_hash")
+
+            if track_changed:
+                self.komoot.delete(record["komoot_tour_id"])
+                gpx_xml = build_gpx(activity, streams)
+                sport = self.komoot.map_sport(activity.sport_type)
+                vis = self.komoot.map_visibility(activity.visibility)
+                upload_result = self.komoot.upload(gpx_xml, sport, activity.name, vis)
+                new_snapshot = make_snapshot(activity, new_hash)
+                self._repo.upsert(aid, upload_result.tour_id, upload_result.status, new_snapshot)
+                results.append({"id": aid, "status": "uploaded", "komoot_tour_id": upload_result.tour_id})
+            elif diff:
+                tour_id = record["komoot_tour_id"]
+                self.komoot.update_meta(
+                    tour_id,
+                    name=diff.get("name", {}).get("new"),
+                    sport=diff.get("sport_type", {}).get("new"),
+                    status=self.komoot.map_visibility(activity.visibility),
+                )
+                new_snapshot = make_snapshot(activity, new_hash)
+                self._repo.upsert(aid, tour_id, record["status"], new_snapshot)
+                results.append({"id": aid, "status": "updated", "komoot_tour_id": tour_id})
+            else:
+                results.append({"id": aid, "status": "no_changes"})
+
+        self._jobs[job_id]["current"] = len(activity_ids)
+        return {"results": results}
 
     def get_job(self, job_id: str) -> dict[str, Any] | None:
         return self._jobs.get(job_id)

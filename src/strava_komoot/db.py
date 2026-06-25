@@ -21,15 +21,23 @@ CREATE TABLE IF NOT EXISTS synced (
 
 def get_db() -> sqlite3.Connection:
     DB_DIR.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(DB_PATH))
+    conn = sqlite3.connect(str(DB_PATH), check_same_thread=False)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
     conn.execute(SCHEMA)
     return conn
 
 
 class SyncRepo:
-    def __init__(self):
-        self._conn = get_db()
+    def __init__(self, db_path: Path | None = None):
+        if db_path:
+            db_path.parent.mkdir(parents=True, exist_ok=True)
+            self._conn = sqlite3.connect(str(db_path), check_same_thread=False)
+            self._conn.row_factory = sqlite3.Row
+            self._conn.execute("PRAGMA journal_mode=WAL")
+            self._conn.execute(SCHEMA)
+        else:
+            self._conn = get_db()
 
     def get(self, strava_id: int) -> dict | None:
         row = self._conn.execute(
