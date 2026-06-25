@@ -62,11 +62,31 @@ uv run uvicorn src.strava_komoot.web:app --reload
 - Bitwarden-записи: `strava-client-id` (field `CLAIENT_ID`), `strava-client-secret` (field `CLIENT_SECRET`), `komoot-email` (field `EMAIL`), `komoot-pass` (field `PASS`)
 - Лаунчер: `scripts/opencode-strava.sh`
 
+## Текущая сессия (25 июня 2026)
+
+### Исправленные баги
+
+1. **`sport_type` не парсился** (`strava.py:105`) — stravalib возвращает `SportType(root='Ride')`, `str()` давал `"root='Ride'"`, фильтр `BIKE_SPORTS` отбрасывал все. Исправлено на `.root if hasattr(raw, "root") else str(raw)`.
+
+2. **`limit` считал сырые, а не отфильтрованные активности** (`strava.py:122`) — limit=50 показывал меньше 50, если среди них были не-вело. Исправлено: break после набора `limit` bike-активностей, без передачи `limit` в stravalib.
+
+3. **`self._komoot` вместо `self.komoot`** (`sync.py:103,150,152,153,160,164`) — lazy-проперти не вызывалась, `_komoot` оставался None. Исправлено: `self.komoot` (через property).
+
+4. **Добавлен фильтр по типу активности** (sport_type) в UI: Type: All / Ride / AlpineSki / ... + Load: 10/30/50/100/All. Фильтр и лимит сохраняют друг друга.
+
+### Решённая проблема
+
+~~**Komoot login возвращает 403.**~~ ✅ **Причина:** в конфигурации был сохранён email `kulek.adam@gmail` (без `.com`). После исправления на `kulek.adam@gmail.com` — login 200 OK, синхронизация работает.
+
+Первая протестированная синхронизация: active #19053536132 → Komoot tour_id `3064442086`.
+
+**Тесты:** 31/31 проходят
+
 ## Что дальше (не реализовано)
 
 - Создать `.env` с реальными ключами (через Bitwarden-скрипт)
 - Авторизоваться в Strava (первый запуск)
-- Протестировать синхронизацию одной активности
+- ✅ Протестировать синхронизацию одной активности — заблокировано Komoot 403
 - Webhooks от Strava
 - Multi-user
 - Playwright-фолбэк для Komoot

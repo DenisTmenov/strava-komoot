@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import FastAPI, Form, Request
+from fastapi import FastAPI, Form, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from pathlib import Path
@@ -23,11 +23,14 @@ def get_engine() -> SyncEngine:
 
 
 @app.get("/")
-def index(request: Request) -> HTMLResponse:
+def index(request: Request, limit: int = Query(default=10, ge=0), sport_type: str = Query(default="all")) -> HTMLResponse:
     try:
-        classified = get_engine().classify()
+        st = sport_type if sport_type != "all" else None
+        classified = get_engine().classify(limit=limit or None, sport_type=st)
+        sport_types = get_engine().strava.get_sport_types()
     except Exception:
         classified = {"new": [], "modified": [], "synced": []}
+        sport_types = []
     return templates.TemplateResponse(
         request,
         "index.html",
@@ -35,8 +38,11 @@ def index(request: Request) -> HTMLResponse:
             "new": classified["new"],
             "modified": classified["modified"],
             "synced": classified["synced"],
+            "sport_types": sport_types,
+            "current_sport": sport_type,
             "strava_ok": bool(settings.strava_client_id and settings.strava_client_secret),
             "komoot_ok": bool(settings.komoot_email and settings.komoot_password),
+            "limit": limit,
         },
     )
 

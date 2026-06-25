@@ -30,8 +30,8 @@ class SyncEngine:
             self._komoot = KomootSink()
         return self._komoot
 
-    def classify(self, after: datetime | None = None) -> dict[str, list[dict]]:
-        activities = self.strava.list_activities(after=after)
+    def classify(self, after: datetime | None = None, limit: int | None = None, sport_type: str | None = None) -> dict[str, list[dict]]:
+        activities = self.strava.list_activities(after=after, limit=limit, sport_type=sport_type)
         result = {"new": [], "modified": [], "synced": []}
 
         for a in activities:
@@ -100,11 +100,11 @@ class SyncEngine:
 
             gpx_xml = build_gpx(activity, streams)
             h = track_hash(streams)
-            sport = self._komoot.map_sport(activity.sport_type)
-            vis = self._komoot.map_visibility(activity.visibility)
+            sport = self.komoot.map_sport(activity.sport_type)
+            vis = self.komoot.map_visibility(activity.visibility)
 
             try:
-                result = self._komoot.upload(gpx_xml, sport, activity.name, vis)
+                result = self.komoot.upload(gpx_xml, sport, activity.name, vis)
             except Exception as e:
                 results.append({"id": aid, "status": "error", "error": f"upload: {e}"})
                 continue
@@ -147,21 +147,21 @@ class SyncEngine:
             track_changed = new_hash != old_snapshot.get("track_hash")
 
             if track_changed:
-                self._komoot.delete(record["komoot_tour_id"])
+                self.komoot.delete(record["komoot_tour_id"])
                 gpx_xml = build_gpx(activity, streams)
-                sport = self._komoot.map_sport(activity.sport_type)
-                vis = self._komoot.map_visibility(activity.visibility)
-                upload_result = self._komoot.upload(gpx_xml, sport, activity.name, vis)
+                sport = self.komoot.map_sport(activity.sport_type)
+                vis = self.komoot.map_visibility(activity.visibility)
+                upload_result = self.komoot.upload(gpx_xml, sport, activity.name, vis)
                 new_snapshot = make_snapshot(activity, new_hash)
                 self._repo.upsert(aid, upload_result.tour_id, upload_result.status, new_snapshot)
                 results.append({"id": aid, "status": "uploaded", "komoot_tour_id": upload_result.tour_id})
             elif diff:
                 tour_id = record["komoot_tour_id"]
-                self._komoot.update_meta(
+                self.komoot.update_meta(
                     tour_id,
                     name=diff.get("name", {}).get("new"),
                     sport=diff.get("sport_type", {}).get("new"),
-                    status=self._komoot.map_visibility(activity.visibility),
+                    status=self.komoot.map_visibility(activity.visibility),
                 )
                 new_snapshot = make_snapshot(activity, new_hash)
                 self._repo.upsert(aid, tour_id, record["status"], new_snapshot)

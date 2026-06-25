@@ -98,11 +98,15 @@ class StravaSource:
         self._client.refresh_token = token["refresh_token"]
         self._client.token_expires = token["expires_at"]
 
-    def list_activities(self, after: datetime | None = None, limit: int | None = None) -> list[StravaActivity]:
+    def list_activities(self, after: datetime | None = None, limit: int | None = None, sport_type: str | None = None) -> list[StravaActivity]:
         activities = []
-        for a in self._client.get_activities(after=after, limit=limit):
-            sport = str(a.sport_type or a.type or "")
-            if sport not in BIKE_SPORTS:
+        for a in self._client.get_activities(after=after):
+            raw = a.sport_type or a.type or ""
+            sport = raw.root if hasattr(raw, "root") else str(raw)
+            if sport_type:
+                if sport != sport_type:
+                    continue
+            elif sport not in BIKE_SPORTS:
                 continue
             distance = float(a.distance) if a.distance else 0.0
             elev = float(a.total_elevation_gain) if a.total_elevation_gain else 0.0
@@ -118,7 +122,17 @@ class StravaSource:
                     visibility=a.visibility,
                 )
             )
+            if limit and len(activities) >= limit:
+                break
         return activities
+
+    def get_sport_types(self) -> list[str]:
+        types: set[str] = set()
+        for a in self._client.get_activities(limit=200):
+            raw = a.sport_type or a.type or ""
+            sport = raw.root if hasattr(raw, "root") else str(raw)
+            types.add(sport)
+        return sorted(types)
 
     def get_streams(self, activity_id: int) -> dict:
         return self._client.get_activity_streams(
