@@ -1,6 +1,6 @@
 {
   "$schema": "https://opencode.ai/config.json",
-  "model": "google/gemini-2.5-flash",
-  "small_model": "google/gemini-2.5-flash",
+  "model": "opencode/deepseek-v4-flash-free",
+  "small_model": "opencode/deepseek-v4-flash-free",
   "instructions": [".opencode/CONVENTIONS.md"]
 }
