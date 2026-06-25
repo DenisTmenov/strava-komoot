@@ -30,9 +30,10 @@ class StravaActivity:
 
 
 class StravaSource:
-    def __init__(self):
+    def __init__(self, auto_login: bool = True):
         self._client = Client()
-        self._ensure_token()
+        if auto_login:
+            self._ensure_token()
 
     def _ensure_token(self) -> None:
         token_data = self._load_token()
@@ -42,24 +43,33 @@ class StravaSource:
             self._client.token_expires = token_data["expires_at"]
             if self._client.token_expires and datetime.now().timestamp() >= self._client.token_expires:
                 self._refresh_token()
-        else:
+        elif settings.strava_client_id and settings.strava_client_secret:
             self._authorize()
 
-    def _authorize(self) -> None:
-        url = self._client.authorization_url(
+    def is_authenticated(self) -> bool:
+        return bool(self._client.access_token)
+
+    def get_authorization_url(self) -> str:
+        return self._client.authorization_url(
             client_id=int(settings.strava_client_id),
             redirect_uri="http://localhost:8000/auth/strava/callback",
             scope=["read", "activity:read_all"],
         )
-        print(f"Open this URL in browser:\n{url}")
-        webbrowser.open(url)
-        code = input("Paste the code from the redirect URL: ").strip()
+
+    def handle_callback(self, code: str) -> None:
         token = self._client.exchange_code_for_token(
             client_id=int(settings.strava_client_id),
             client_secret=settings.strava_client_secret,
             code=code,
         )
         self._save_token(token)
+
+    def _authorize(self) -> None:
+        url = self.get_authorization_url()
+        print(f"Open this URL in browser:\n{url}")
+        webbrowser.open(url)
+        code = input("Paste the code from the redirect URL: ").strip()
+        self.handle_callback(code)
 
     def _refresh_token(self) -> None:
         token = self._client.refresh_access_token(

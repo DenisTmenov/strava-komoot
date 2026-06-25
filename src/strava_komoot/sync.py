@@ -13,13 +13,25 @@ from strava_komoot.strava import StravaSource
 
 class SyncEngine:
     def __init__(self):
-        self._strava = StravaSource()
-        self._komoot = KomootSink()
+        self._strava: StravaSource | None = None
+        self._komoot: KomootSink | None = None
         self._repo = SyncRepo()
         self._jobs: dict[str, dict[str, Any]] = {}
 
+    @property
+    def strava(self) -> StravaSource:
+        if self._strava is None:
+            self._strava = StravaSource()
+        return self._strava
+
+    @property
+    def komoot(self) -> KomootSink:
+        if self._komoot is None:
+            self._komoot = KomootSink()
+        return self._komoot
+
     def classify(self, after: datetime | None = None) -> dict[str, list[dict]]:
-        activities = self._strava.list_activities(after=after)
+        activities = self.strava.list_activities(after=after)
         result = {"new": [], "modified": [], "synced": []}
 
         for a in activities:
@@ -32,7 +44,7 @@ class SyncEngine:
                     result["new"].append(self._activity_to_dict(a))
                     continue
                 if "track_hash" in snapshot:
-                    streams = self._strava.get_streams(a.id)
+                    streams = self.strava.get_streams(a.id)
                     current_hash = track_hash(streams)
                     if current_hash != snapshot["track_hash"]:
                         diff = activity_diff(a, snapshot) or {}
@@ -71,7 +83,7 @@ class SyncEngine:
         }
 
     def sync(self, activity_ids: list[int]) -> dict:
-        activities = {a.id: a for a in self._strava.list_activities() if a.id in activity_ids}
+        activities = {a.id: a for a in self.strava.list_activities() if a.id in activity_ids}
         results = []
 
         for aid in activity_ids:
@@ -81,7 +93,7 @@ class SyncEngine:
                 continue
 
             try:
-                streams = self._strava.get_streams(aid)
+                streams = self.strava.get_streams(aid)
             except Exception as e:
                 results.append({"id": aid, "status": "error", "error": f"streams: {e}"})
                 continue
@@ -104,7 +116,7 @@ class SyncEngine:
         return {"results": results}
 
     def apply(self, activity_ids: list[int]) -> dict:
-        activities = {a.id: a for a in self._strava.list_activities() if a.id in activity_ids}
+        activities = {a.id: a for a in self.strava.list_activities() if a.id in activity_ids}
         results = []
 
         for aid in activity_ids:
@@ -126,7 +138,7 @@ class SyncEngine:
             diff = activity_diff(activity, old_snapshot)
 
             try:
-                streams = self._strava.get_streams(aid)
+                streams = self.strava.get_streams(aid)
             except Exception as e:
                 results.append({"id": aid, "status": "error", "error": f"streams: {e}"})
                 continue

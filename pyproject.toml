@@ -12,6 +12,7 @@ dependencies = [
     "kompy>=0.0.12",
     "pydantic-settings>=2.7",
     "python-dotenv>=1.0",
+    "python-multipart>=0.0.32",
 ]
 
 [project.optional-dependencies]

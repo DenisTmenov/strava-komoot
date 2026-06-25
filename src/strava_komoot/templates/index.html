@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Strava → Komoot Sync</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; background: #f5f5f5; padding: 20px; color: #333; }
+  h1 { margin-bottom: 8px; }
+  .config-warning { background: #fff3cd; border: 1px solid #ffc107; padding: 12px; border-radius: 6px; margin-bottom: 16px; }
+  .block { background: #fff; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); margin-bottom: 16px; overflow: hidden; }
+  .block-header { padding: 12px 16px; font-weight: 600; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid #eee; }
+  .block-header.modified { background: #fff8e1; }
+  .block-header.new { background: #e8f5e9; }
+  .block-header.synced { background: #f5f5f5; cursor: pointer; }
+  .block-content { padding: 0; }
+  .block-content.collapsed { display: none; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { padding: 10px 16px; text-align: left; border-bottom: 1px solid #f0f0f0; font-size: 14px; }
+  th { background: #fafafa; font-weight: 600; font-size: 12px; text-transform: uppercase; color: #666; }
+  .chip { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 600; margin: 1px; }
+  .chip.name { background: #e3f2fd; color: #1565c0; }
+  .chip.sport { background: #fce4ec; color: #c62828; }
+  .chip.visibility { background: #f3e5f5; color: #6a1b9a; }
+  .chip.track { background: #fff3e0; color: #e65100; }
+  .diff-popup { display: none; position: absolute; background: #fff; border: 1px solid #ddd; border-radius: 6px; padding: 8px 12px; font-size: 13px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); white-space: pre; z-index: 10; }
+  .diff-popup.show { display: block; }
+  .btn { padding: 6px 16px; border-radius: 6px; border: none; cursor: pointer; font-size: 13px; font-weight: 500; }
+  .btn-primary { background: #1976d2; color: #fff; }
+  .btn-primary:hover { background: #1565c0; }
+  .btn-warning { background: #f57c00; color: #fff; }
+  .btn-warning:hover { background: #e65100; }
+  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .badge { background: #e0e0e0; padding: 2px 8px; border-radius: 10px; font-size: 12px; }
+  .status { font-size: 12px; padding: 2px 8px; border-radius: 10px; }
+  .status.synced { background: #e8f5e9; color: #2e7d32; }
+  .status.already_present { background: #fff8e1; color: #f57f17; }
+  .status.error { background: #ffebee; color: #c62828; }
+  .spinner { display: none; width: 16px; height: 16px; border: 2px solid #e0e0e0; border-top-color: #1976d2; border-radius: 50%; animation: spin 0.6s linear infinite; }
+  .spinner.show { display: inline-block; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .row-select { width: 40px; }
+  .distance, .time { color: #666; font-size: 13px; }
+  a { color: #1976d2; text-decoration: none; }
+  a:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+<h1>Strava → Komoot Sync</h1>
+
+{% if not strava_ok or not komoot_ok %}
+<div class="config-warning">
+  <strong>Configuration incomplete.</strong>
+  {% if not strava_ok %} STRAVA_CLIENT_ID and STRAVA_CLIENT_SECRET missing. {% endif %}
+  {% if not komoot_ok %} KOMOOT_EMAIL and KOMOOT_PASSWORD missing. {% endif %}
+  Set them in <code>.env</code> file and restart.
+</div>
+{% endif %}
+
+{% if modified %}
+<div class="block">
+  <div class="block-header modified">
+    <input type="checkbox" onchange="toggleAll(this, 'modified')">
+    <span>Modified after sync ({{ modified|length }})</span>
+    <button class="btn btn-warning" onclick="bulkAction('apply', 'modified')">Apply selected</button>
+  </div>
+  <div class="block-content" id="modified-table">
+    <table>
+      <tr>
+        <th class="row-select"></th><th>Date</th><th>Name</th><th>Type</th><th>Distance</th><th>Changes</th><th></th>
+      </tr>
+      {% for act in modified %}
+      <tr data-id="{{ act.id }}">
+        <td><input type="checkbox" class="row-cb modified-cb" value="{{ act.id }}"></td>
+        <td>{{ act.start_date[:10] }}</td>
+        <td>{{ act.name }}</td>
+        <td>{{ act.sport_type }}</td>
+        <td class="distance">{{ "%.1f"|format(act.distance / 1000) }} km</td>
+        <td>
+          {% if act.changes %}
+            {% if act.changes.name %}<span class="chip name" onclick="showDiff(this, '{{ act.changes.name.old | e }} → {{ act.changes.name.new | e }}')">name</span>{% endif %}
+            {% if act.changes.sport_type %}<span class="chip sport" onclick="showDiff(this, '{{ act.changes.sport_type.old }} → {{ act.changes.sport_type.new }}')">sport</span>{% endif %}
+            {% if act.changes.visibility %}<span class="chip visibility" onclick="showDiff(this, '{{ act.changes.visibility.old }} → {{ act.changes.visibility.new }}')">visibility</span>{% endif %}
+            {% if act.changes.track %}<span class="chip track">track</span>{% endif %}
+          {% endif %}
+        </td>
+        <td><button class="btn btn-warning" onclick="bulkAction('apply', [{{ act.id }}])">Apply</button></td>
+      </tr>
+      {% endfor %}
+    </table>
+  </div>
+</div>
+{% endif %}
+
+<div class="block">
+  <div class="block-header new">
+    <input type="checkbox" onchange="toggleAll(this, 'new')">
+    <span>New ({{ new|length }})</span>
+    <button class="btn btn-primary" onclick="bulkAction('sync', 'new')">Sync selected</button>
+  </div>
+  <div class="block-content" id="new-table">
+    {% if new %}
+    <table>
+      <tr>
+        <th class="row-select"></th><th>Date</th><th>Name</th><th>Type</th><th>Distance</th><th>Status</th><th></th>
+      </tr>
+      {% for act in new %}
+      <tr data-id="{{ act.id }}">
+        <td><input type="checkbox" class="row-cb new-cb" value="{{ act.id }}"></td>
+        <td>{{ act.start_date[:10] }}</td>
+        <td>{{ act.name }}</td>
+        <td>{{ act.sport_type }}</td>
+        <td class="distance">{{ "%.1f"|format(act.distance / 1000) }} km</td>
+        <td><span class="status">new</span></td>
+        <td><button class="btn btn-primary" onclick="bulkAction('sync', [{{ act.id }}])">Sync</button></td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% else %}
+    <div style="padding: 24px; text-align: center; color: #999;">No new activities</div>
+    {% endif %}
+  </div>
+</div>
+
+<div class="block">
+  <div class="block-header synced" onclick="toggleCollapse(this)">
+    <span>Synced ({{ synced|length }})</span>
+    <span class="badge" id="synced-count">{{ synced|length }}</span>
+  </div>
+  <div class="block-content collapsed" id="synced-table">
+    {% if synced %}
+    <table>
+      <tr><th>Date</th><th>Name</th><th>Type</th><th>Komoot Tour</th><th>Synced at</th></tr>
+      {% for act in synced %}
+      <tr>
+        <td>{{ act.start_date[:10] }}</td>
+        <td>{{ act.name }}</td>
+        <td>{{ act.sport_type }}</td>
+        <td><a href="https://www.komoot.com/tour/{{ act.komoot_tour_id }}" target="_blank">{{ act.komoot_tour_id }}</a></td>
+        <td>{{ act.synced_at[:16] }}</td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% else %}
+    <div style="padding: 24px; text-align: center; color: #999;">No synced activities yet</div>
+    {% endif %}
+  </div>
+</div>
+
+<div id="diff-popup" class="diff-popup"></div>
+
+<script>
+function toggleAll(master, block) {
+  document.querySelectorAll('.' + block + '-cb').forEach(cb => cb.checked = master.checked);
+}
+
+function getSelected(block) {
+  return Array.from(document.querySelectorAll('.' + block + '-cb:checked')).map(cb => parseInt(cb.value));
+}
+
+function toggleCollapse(header) {
+  const content = header.nextElementSibling;
+  content.classList.toggle('collapsed');
+}
+
+function showDiff(el, text) {
+  const popup = document.getElementById('diff-popup');
+  popup.textContent = text;
+  popup.classList.add('show');
+  const rect = el.getBoundingClientRect();
+  popup.style.left = rect.left + 'px';
+  popup.style.top = (rect.bottom + 4) + 'px';
+}
+
+document.addEventListener('click', function(e) {
+  if (!e.target.closest('.chip')) {
+    document.getElementById('diff-popup').classList.remove('show');
+  }
+});
+
+function bulkAction(action, ids) {
+  if (ids === 'new' || ids === 'modified') {
+    ids = getSelected(ids);
+  }
+  if (!ids || ids.length === 0) return;
+
+  const form = new FormData();
+  ids.forEach(id => form.append('ids', id));
+
+  fetch('/' + action, { method: 'POST', body: form })
+    .then(r => r.json())
+    .then(data => {
+      pollJob(data.job_id, action);
+    });
+}
+
+function pollJob(jobId, action) {
+  const interval = setInterval(() => {
+    fetch('/jobs/' + jobId)
+      .then(r => r.json())
+      .then(job => {
+        if (job.status === 'completed') {
+          clearInterval(interval);
+          location.reload();
+        }
+      });
+  }, 2000);
+}
+</script>
+</body>
+</html>
