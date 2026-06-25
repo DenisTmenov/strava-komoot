@@ -1,0 +1,24 @@
+[project]
+name = "strava-komoot"
+version = "0.1.0"
+description = "Sync bike activities from Strava to Komoot"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.34",
+    "jinja2>=3.1",
+    "stravalib>=2.3",
+    "gpxpy>=1.6",
+    "kompy>=0.0.12",
+    "pydantic-settings>=2.7",
+    "python-dotenv>=1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "responses>=0.25",
+]
+
+[dependency-groups]
+dev = ["strava-komoot[dev]"]
