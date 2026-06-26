@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import json
 import os
 import webbrowser
@@ -7,6 +8,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
+import requests
 from stravalib.client import Client
 
 from strava_komoot.config import settings
@@ -15,6 +17,15 @@ TOKEN_DIR = Path.home() / ".strava_komoot"
 TOKEN_FILE = TOKEN_DIR / "tokens.json"
 
 BIKE_SPORTS = {"Ride", "MountainBikeRide", "GravelRide", "EBikeRide"}
+
+
+@dataclass
+class StravaMedia:
+    unique_id: str
+    url: str
+    media_type: str  # "photo" or "video"
+    lat: float | None = None
+    lng: float | None = None
 
 
 @dataclass
@@ -133,6 +144,31 @@ class StravaSource:
             sport = raw.root if hasattr(raw, "root") else str(raw)
             types.add(sport)
         return sorted(types)
+
+    def get_photos(self, activity_id: int) -> list[StravaMedia]:
+        result = []
+        for photo in self._client.get_activity_photos(activity_id, size=600):
+            if not photo.urls:
+                continue
+            url = next(iter(photo.urls.values()), None)
+            if not url:
+                continue
+            mtype = "video" if photo.type == 1 else "photo"
+            lat = lng = None
+            if photo.location:
+                lat = photo.location.lat
+                lng = photo.location.lon
+            result.append(StravaMedia(
+                unique_id=photo.unique_id,
+                url=url,
+                media_type=mtype,
+                lat=lat,
+                lng=lng,
+            ))
+        return result
+
+    def download_media(self, media: StravaMedia) -> bytes:
+        return requests.get(media.url, timeout=30).content
 
     def get_streams(self, activity_id: int) -> dict:
         return self._client.get_activity_streams(

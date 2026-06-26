@@ -61,6 +61,15 @@ def apply(ids: list[int] = Form(...)) -> JSONResponse:
     return JSONResponse({"job_id": job_id})
 
 
+@app.post("/verify")
+def verify() -> JSONResponse:
+    ids = get_engine().list_synced_ids()
+    if not ids:
+        return JSONResponse({"job_id": None, "message": "No synced activities to verify"})
+    job_id = get_engine().start_job("verify", ids)
+    return JSONResponse({"job_id": job_id})
+
+
 @app.get("/jobs/{job_id}")
 def get_job(job_id: str) -> JSONResponse:
     job = get_engine().get_job(job_id)

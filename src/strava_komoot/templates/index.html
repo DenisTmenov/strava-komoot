@@ -163,6 +163,7 @@
   <div class="block-header synced" onclick="toggleCollapse(this)">
     <span>Synced ({{ synced|length }})</span>
     <span class="badge" id="synced-count">{{ synced|length }}</span>
+    <button class="btn btn-primary" onclick="event.stopPropagation(); verifySynced()" style="margin-left:auto">Verify</button>
   </div>
   <div class="block-content collapsed" id="synced-table">
     {% if synced %}
@@ -257,17 +258,46 @@ function pollJob(jobId) {
       .then(r => r.json())
       .then(job => {
         if (job.status === 'running') {
+          if (job.type === 'verify') {
+            document.getElementById('progress-title').textContent = 'Verifying synced activities...';
+          }
           showProgress(job.type, job.total, job.current, job.current_name);
         } else if (job.status === 'completed') {
           clearInterval(interval);
-          showProgress(job.type, job.total, job.total, 'Done!');
-          setTimeout(() => location.reload(), 600);
+          if (job.type === 'verify') {
+            const missing = (job.result && job.result.missing && job.result.missing.length) || 0;
+            showProgress('verify', job.total, job.total, missing + ' missing on Komoot, will re-appear as "New"');
+            setTimeout(() => location.reload(), 1500);
+          } else {
+            showProgress(job.type, job.total, job.total, 'Done!');
+            setTimeout(() => location.reload(), 600);
+          }
         } else if (job.status === 'error') {
           clearInterval(interval);
           document.getElementById('progress-title').textContent = 'Error: ' + (job.error || 'unknown');
         }
       });
   }, 1000);
+}
+
+function verifySynced() {
+  const overlay = document.getElementById('progress-overlay');
+  document.getElementById('progress-title').textContent = 'Verifying synced activities...';
+  document.getElementById('progress-count').textContent = '...';
+  document.getElementById('progress-bar').style.width = '0%';
+  document.getElementById('progress-activity').textContent = '';
+  overlay.classList.add('show');
+
+  fetch('/verify', { method: 'POST' })
+    .then(r => r.json())
+    .then(data => {
+      if (data.job_id) {
+        pollJob(data.job_id);
+      } else {
+        document.getElementById('progress-title').textContent = data.message || 'Nothing to verify';
+        setTimeout(() => location.reload(), 1000);
+      }
+    });
 }
 </script>
 </body>

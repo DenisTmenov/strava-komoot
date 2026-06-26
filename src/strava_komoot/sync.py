@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import logging
 import threading
 import uuid
 from datetime import datetime, timezone
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 from strava_komoot.db import SyncRepo
 from strava_komoot.diff import activity_diff, make_snapshot
@@ -110,11 +113,40 @@ class SyncEngine:
                 results.append({"id": aid, "status": "error", "error": f"upload: {e}"})
                 continue
 
+            self._upload_activity_media(activity, result.tour_id)
+
             snapshot = make_snapshot(activity, h)
             self._repo.upsert(aid, result.tour_id, result.status, snapshot)
             results.append({"id": aid, "status": result.status, "komoot_tour_id": result.tour_id})
 
         return {"results": results}
+
+    def _upload_activity_media(self, activity, tour_id: int) -> dict:
+        media_results = {"photo": 0, "video": 0}
+        try:
+            photos = self.strava.get_photos(activity.id)
+        except Exception as e:
+            logger.warning("Failed to get photos for %s: %s", activity.id, e)
+            return media_results
+        for photo in photos:
+            try:
+                data = self.strava.download_media(photo)
+            except Exception as e:
+                logger.warning("Failed to download %s for %s: %s", photo.media_type, activity.id, e)
+                continue
+            try:
+                ok = self.komoot.upload_photo(
+                    tour_id=tour_id,
+                    image_path=data,
+                    lat=photo.lat,
+                    lng=photo.lng,
+                    media_type=photo.media_type,
+                )
+                if ok:
+                    media_results[photo.media_type] += 1
+            except Exception as e:
+                logger.warning("Failed to upload %s for %s: %s", photo.media_type, activity.id, e)
+        return media_results
 
     def apply(self, activity_ids: list[int]) -> dict:
         activities = {a.id: a for a in self.strava.list_activities() if a.id in activity_ids}
@@ -153,6 +185,7 @@ class SyncEngine:
                 sport = self.komoot.map_sport(activity.sport_type)
                 vis = self.komoot.map_visibility(activity.visibility)
                 upload_result = self.komoot.upload(gpx_xml, sport, activity.name, vis)
+                self._upload_activity_media(activity, upload_result.tour_id)
                 new_snapshot = make_snapshot(activity, new_hash)
                 self._repo.upsert(aid, upload_result.tour_id, upload_result.status, new_snapshot)
                 results.append({"id": aid, "status": "uploaded", "komoot_tour_id": upload_result.tour_id})
@@ -192,6 +225,8 @@ class SyncEngine:
                 result = self._sync_with_progress(job_id, activity_ids)
             elif job_type == "apply":
                 result = self._apply_with_progress(job_id, activity_ids)
+            elif job_type == "verify":
+                result = self._verify_with_progress(job_id, activity_ids)
             else:
                 result = {"results": [{"id": aid, "status": "error", "error": f"unknown job type: {job_type}"} for aid in activity_ids]}
             self._jobs[job_id]["result"] = result
@@ -230,6 +265,8 @@ class SyncEngine:
             except Exception as e:
                 results.append({"id": aid, "status": "error", "error": f"upload: {e}"})
                 continue
+
+            self._upload_activity_media(activity, result.tour_id)
 
             snapshot = make_snapshot(activity, h)
             self._repo.upsert(aid, result.tour_id, result.status, snapshot)
@@ -279,6 +316,7 @@ class SyncEngine:
                 sport = self.komoot.map_sport(activity.sport_type)
                 vis = self.komoot.map_visibility(activity.visibility)
                 upload_result = self.komoot.upload(gpx_xml, sport, activity.name, vis)
+                self._upload_activity_media(activity, upload_result.tour_id)
                 new_snapshot = make_snapshot(activity, new_hash)
                 self._repo.upsert(aid, upload_result.tour_id, upload_result.status, new_snapshot)
                 results.append({"id": aid, "status": "uploaded", "komoot_tour_id": upload_result.tour_id})
@@ -298,6 +336,38 @@ class SyncEngine:
 
         self._jobs[job_id]["current"] = len(activity_ids)
         return {"results": results}
+
+    def list_synced_ids(self) -> list[int]:
+        return [r["strava_id"] for r in self._repo.list_all()
+                if r["status"] in ("synced", "already_present")]
+
+    def verify(self, activity_ids: list[int]) -> dict:
+        results = []
+        for aid in activity_ids:
+            record = self._repo.get(aid)
+            if record is None:
+                continue
+            exists = self.komoot.tour_exists(record["komoot_tour_id"])
+            if not exists:
+                self._repo.delete(aid)
+                results.append({"id": aid, "komoot_tour_id": record["komoot_tour_id"]})
+        return {"results": results, "missing": results}
+
+    def _verify_with_progress(self, job_id: str, activity_ids: list[int]) -> dict:
+        results = []
+        for idx, aid in enumerate(activity_ids):
+            record = self._repo.get(aid)
+            name = str(aid)
+            self._jobs[job_id]["current"] = idx
+            self._jobs[job_id]["current_name"] = name
+            if record is None:
+                continue
+            exists = self.komoot.tour_exists(record["komoot_tour_id"])
+            if not exists:
+                self._repo.delete(aid)
+                results.append({"id": aid, "komoot_tour_id": record["komoot_tour_id"]})
+        self._jobs[job_id]["current"] = len(activity_ids)
+        return {"results": results, "missing": results}
 
     def get_job(self, job_id: str) -> dict[str, Any] | None:
         return self._jobs.get(job_id)

@@ -1,13 +1,17 @@
 from __future__ import annotations
 
+import hashlib
 import logging
 from dataclasses import dataclass
+from pathlib import Path
 
 import requests
 from kompy import KomootConnector
 from kompy.constants.activities import SupportedActivities
 from kompy.constants.urls import KomootUrl
 from kompy.constants.privacy_status import PrivacyStatus
+from PIL import Image
+from PIL.ExifTags import GPSTAGS, IFD
 
 from strava_komoot.config import settings
 
@@ -96,6 +100,15 @@ class KomootSink:
         )
         return resp.status_code == 200
 
+    def tour_exists(self, tour_id: int) -> bool:
+        url = KomootUrl.TOUR_URL.format(tour_identifier=tour_id)
+        resp = requests.get(
+            url=url,
+            auth=(self._auth.get_email_address(), self._auth.get_password()),
+            headers={"User-Agent": "StravaKomootSync"},
+        )
+        return resp.status_code == 200
+
     def delete(self, tour_id: int) -> bool:
         url = KomootUrl.TOUR_URL.format(tour_identifier=tour_id)
         resp = requests.delete(
@@ -104,3 +117,102 @@ class KomootSink:
             headers={"User-Agent": "StravaKomootSync"},
         )
         return resp.status_code == 200
+
+    @staticmethod
+    def _gps_from_exif(image_path: str | Path) -> tuple[float, float] | None:
+        try:
+            img = Image.open(image_path)
+            exif = img.getexif()
+            if ifd := exif.get_ifd(IFD.GPSInfo):
+                def _to_decimal(values, ref):
+                    d, m, s = values
+                    dec = d + m / 60.0 + s / 3600.0
+                    if ref in ("S", "W"):
+                        dec = -dec
+                    return dec
+                lat = _to_decimal(ifd[2], ifd[1])
+                lng = _to_decimal(ifd[4], ifd[3])
+                return lat, lng
+        except Exception:
+            pass
+        return None
+
+    def upload_photo(
+        self,
+        tour_id: int,
+        image_path: str | Path | bytes,
+        lat: float | None = None,
+        lng: float | None = None,
+        media_type: str = "photo",
+        content_type: str | None = None,
+        unique_id: str | None = None,
+    ) -> bool:
+        koa_cookie = f"{self._auth.get_username()}|{self._auth.get_token()}"
+        headers = {"User-Agent": "StravaKomootSync", "Content-Type": "application/json"}
+        cookies = {"koa_at": koa_cookie}
+
+        if lat is None or lng is None:
+            if isinstance(image_path, (str, Path)):
+                coords = self._gps_from_exif(image_path)
+                if coords:
+                    lat, lng = coords
+            if lat is None or lng is None:
+                logger.warning("No GPS coords for media, using (0, 0)")
+                lat, lng = 0.0, 0.0
+
+        poi_url = f"https://www.komoot.com/api/v006/tours/{tour_id}/pois/?srid=4326"
+        poi_body = {
+            "name": "",
+            "coordinateIndex": 0,
+            "clientHash": hashlib.sha256(self._auth.get_username().encode()).hexdigest(),
+            "point": {"x": lng, "y": lat},
+            "creator": self._auth.get_username(),
+            "content": {"hasImage": False, "text": "", "imageUrl": None},
+        }
+        resp = requests.post(poi_url, headers=headers, cookies=cookies, json=poi_body)
+        if resp.status_code not in (200, 201):
+            logger.error("POI creation failed: %s %s", resp.status_code, resp.text)
+            return False
+        poi_id = resp.headers.get("Location", "").rstrip("/").split("/")[-1]
+        if not poi_id:
+            logger.error("No POI ID in response")
+            return False
+
+        if isinstance(image_path, (str, Path)):
+            data = Path(image_path).read_bytes()
+        else:
+            data = image_path
+
+        if content_type is None:
+            if media_type == "video":
+                content_type = "video/mp4"
+            elif isinstance(image_path, (str, Path)):
+                ext = Path(image_path).suffix.lower()
+                content_type = {
+                    ".png": "image/png",
+                    ".jpg": "image/jpeg",
+                    ".jpeg": "image/jpeg",
+                    ".webp": "image/webp",
+                    ".heic": "image/heic",
+                    ".heif": "image/heif",
+                    ".gif": "image/gif",
+                    ".mp4": "video/mp4",
+                    ".mov": "video/quicktime",
+                }.get(ext, "image/jpeg")
+            else:
+                content_type = "image/jpeg"
+
+        content_path = "video" if media_type == "video" else "image"
+        upload_url = f"https://www.komoot.com/api/v006/pois/{poi_id}/content/{content_path}"
+        upload_headers = {
+            "User-Agent": "StravaKomootSync",
+            "Content-Type": content_type,
+            "Accept": "application/hal+json,application/json",
+        }
+        resp = requests.post(upload_url, headers=upload_headers, cookies=cookies, data=data)
+        if resp.status_code in (200, 201):
+            logger.info("%s uploaded to tour %s (POI %s)", media_type, tour_id, poi_id)
+            return True
+        else:
+            logger.error("%s upload failed: %s %s", media_type, resp.status_code, resp.text)
+            return False
