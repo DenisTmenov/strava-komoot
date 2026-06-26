@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-import io
 import json
 import os
+import warnings
 import webbrowser
 from dataclasses import dataclass
 from datetime import datetime
@@ -10,8 +10,11 @@ from pathlib import Path
 
 import requests
 from stravalib.client import Client
+from urllib3.exceptions import InsecureRequestWarning
 
 from strava_komoot.config import settings
+
+warnings.filterwarnings("ignore", category=InsecureRequestWarning)
 
 TOKEN_DIR = Path.home() / ".strava_komoot"
 TOKEN_FILE = TOKEN_DIR / "tokens.json"
@@ -42,7 +45,9 @@ class StravaActivity:
 
 class StravaSource:
     def __init__(self, auto_login: bool = True):
-        self._client = Client()
+        self._session = requests.Session()
+        self._session.verify = False
+        self._client = Client(requests_session=self._session)
         if auto_login:
             self._ensure_token()
 
@@ -146,20 +151,25 @@ class StravaSource:
         return sorted(types)
 
     def get_photos(self, activity_id: int) -> list[StravaMedia]:
+        url = f"https://www.strava.com/api/v3/activities/{activity_id}/photos?photo_sources=true&size=600"
+        headers = {"Authorization": f"Bearer {self._client.access_token}"}
+        resp = self._session.get(url, headers=headers, timeout=30)
+        if resp.status_code != 200:
+            return []
         result = []
-        for photo in self._client.get_activity_photos(activity_id, size=600):
-            if not photo.urls:
+        for p in resp.json():
+            if not p.get("urls"):
                 continue
-            url = next(iter(photo.urls.values()), None)
+            url = next(iter(p["urls"].values()), None)
             if not url:
                 continue
-            mtype = "video" if photo.type == 1 else "photo"
+            ext = Path(url.split("?")[0]).suffix.lower()
+            mtype = "video" if ext in (".mp4", ".mov", ".avi", ".webm") else "photo"
             lat = lng = None
-            if photo.location:
-                lat = photo.location.lat
-                lng = photo.location.lon
+            if loc := p.get("location"):
+                lat, lng = loc.get("lat"), loc.get("lng")
             result.append(StravaMedia(
-                unique_id=photo.unique_id,
+                unique_id=p.get("unique_id", ""),
                 url=url,
                 media_type=mtype,
                 lat=lat,
@@ -168,7 +178,7 @@ class StravaSource:
         return result
 
     def download_media(self, media: StravaMedia) -> bytes:
-        return requests.get(media.url, timeout=30).content
+        return self._session.get(media.url, timeout=30).content
 
     def get_streams(self, activity_id: int) -> dict:
         return self._client.get_activity_streams(

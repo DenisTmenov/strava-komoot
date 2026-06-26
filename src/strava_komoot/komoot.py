@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import warnings
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -12,8 +13,11 @@ from kompy.constants.urls import KomootUrl
 from kompy.constants.privacy_status import PrivacyStatus
 from PIL import Image
 from PIL.ExifTags import GPSTAGS, IFD
+from urllib3.exceptions import InsecureRequestWarning
 
 from strava_komoot.config import settings
+
+warnings.filterwarnings("ignore", category=InsecureRequestWarning)
 
 logger = logging.getLogger(__name__)
 
@@ -147,9 +151,8 @@ class KomootSink:
         content_type: str | None = None,
         unique_id: str | None = None,
     ) -> bool:
-        koa_cookie = f"{self._auth.get_username()}|{self._auth.get_token()}"
-        headers = {"User-Agent": "StravaKomootSync", "Content-Type": "application/json"}
-        cookies = {"koa_at": koa_cookie}
+        auth = (self._auth.get_email_address(), self._auth.get_password())
+        headers = {"User-Agent": "StravaKomootSync"}
 
         if lat is None or lng is None:
             if isinstance(image_path, (str, Path)):
@@ -169,7 +172,7 @@ class KomootSink:
             "creator": self._auth.get_username(),
             "content": {"hasImage": False, "text": "", "imageUrl": None},
         }
-        resp = requests.post(poi_url, headers=headers, cookies=cookies, json=poi_body)
+        resp = requests.post(poi_url, auth=auth, headers=headers, json=poi_body, verify=False)
         if resp.status_code not in (200, 201):
             logger.error("POI creation failed: %s %s", resp.status_code, resp.text)
             return False
@@ -209,7 +212,7 @@ class KomootSink:
             "Content-Type": content_type,
             "Accept": "application/hal+json,application/json",
         }
-        resp = requests.post(upload_url, headers=upload_headers, cookies=cookies, data=data)
+        resp = requests.post(upload_url, auth=auth, headers=upload_headers, data=data, verify=False)
         if resp.status_code in (200, 201):
             logger.info("%s uploaded to tour %s (POI %s)", media_type, tour_id, poi_id)
             return True
