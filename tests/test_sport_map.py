@@ -20,8 +20,8 @@ class TestSportMapping:
 
 
 class TestVisibilityMapping:
-    def test_everyone_to_public(self):
-        assert STRAVA_VIS_TO_KOMOOT["everyone"] == "public"
+    def test_everyone_to_friends(self):
+        assert STRAVA_VIS_TO_KOMOOT["everyone"] == "friends"
 
     def test_followers_only_to_friends(self):
         assert STRAVA_VIS_TO_KOMOOT["followers_only"] == "friends"

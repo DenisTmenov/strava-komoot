@@ -27,19 +27,13 @@ def get_engine() -> SyncEngine:
 @app.get("/")
 def index(request: Request, limit: int = Query(default=10, ge=0), sport_type: str = Query(default="all")) -> HTMLResponse:
     try:
-        st = sport_type if sport_type != "all" else None
-        classified = get_engine().classify(limit=limit or None, sport_type=st)
-        sport_types = get_engine().strava.get_sport_types()
+        sport_types = get_engine().get_sport_types_cached()
     except Exception:
-        classified = {"new": [], "modified": [], "synced": []}
         sport_types = []
     return templates.TemplateResponse(
         request,
         "index.html",
         {
-            "new": classified["new"],
-            "modified": classified["modified"],
-            "synced": classified["synced"],
             "sport_types": sport_types,
             "current_sport": sport_type,
             "strava_ok": bool(settings.strava_client_id and settings.strava_client_secret),
@@ -76,6 +70,71 @@ def get_job(job_id: str) -> JSONResponse:
     if job is None:
         return JSONResponse({"error": "not found"}, status_code=404)
     return JSONResponse(job)
+
+
+@app.post("/activities/{id}/sync-media")
+def set_sync_media(id: int, sync_media: str = Form("0")):
+    get_engine()._repo.set_sync_media(id, sync_media == "1")
+    return JSONResponse({"ok": True, "sync_media": sync_media == "1"})
+
+
+@app.get("/api/activities")
+def api_activities(
+    sport_type: str = Query(default="all"),
+) -> JSONResponse:
+    st = sport_type if sport_type != "all" else None
+    engine = get_engine()
+    cached = engine.list_activities_cached(sport_type=st)
+
+    result = {"new": [], "modified": [], "synced": [], "unsyncable": []}
+    for act in cached["activities"]:
+        record = engine._repo.get(act["id"])
+
+        is_private = act.get("visibility") == "only_me"
+        has_gps = act.get("has_gps")
+
+        if record and record["status"] not in ("synced", "already_present"):
+            record = None
+
+        if record is None:
+            if is_private and not has_gps:
+                act["unsyncable_reason"] = "Private + no GPS coordinates"
+                act["can_force_sync"] = False
+                result["unsyncable"].append(act)
+            elif is_private:
+                act["unsyncable_reason"] = "Private (only_me)"
+                act["can_force_sync"] = True
+                result["unsyncable"].append(act)
+            elif not has_gps:
+                act["unsyncable_reason"] = "No GPS coordinates"
+                act["can_force_sync"] = False
+                result["unsyncable"].append(act)
+            else:
+                result["new"].append(act)
+        elif record["status"] in ("synced", "already_present"):
+            act["komoot_tour_id"] = record["komoot_tour_id"]
+            act["synced_at"] = record["synced_at"]
+            act["sync_media"] = bool(record["sync_media"])
+            snapshot = engine._repo.get_snapshot(act["id"])
+            if snapshot:
+                changes = {}
+                for field in ("name", "sport_type", "visibility"):
+                    if act.get(field) != snapshot.get(field):
+                        changes[field] = {"old": snapshot.get(field), "new": act.get(field)}
+                if changes:
+                    act["changes"] = changes
+                    result["modified"].append(act)
+                    continue
+            result["synced"].append(act)
+        else:
+            result["new"].append(act)
+
+    return JSONResponse({
+        "new": result["new"],
+        "modified": result["modified"],
+        "synced": result["synced"],
+        "unsyncable": result["unsyncable"],
+    })
 
 
 @app.get("/auth/strava")

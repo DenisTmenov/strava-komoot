@@ -36,21 +36,15 @@
   .badge { background: #e0e0e0; padding: 2px 8px; border-radius: 10px; font-size: 12px; }
   .status { font-size: 12px; padding: 2px 8px; border-radius: 10px; }
   .status.synced { background: #e8f5e9; color: #2e7d32; }
-  .status.already_present { background: #fff8e1; color: #f57f17; }
-  .status.error { background: #ffebee; color: #c62828; }
   .spinner { display: none; width: 16px; height: 16px; border: 2px solid #e0e0e0; border-top-color: #1976d2; border-radius: 50%; animation: spin 0.6s linear infinite; }
   .spinner.show { display: inline-block; }
   @keyframes spin { to { transform: rotate(360deg); } }
   .row-select { width: 40px; }
-  .distance, .time { color: #666; font-size: 13px; }
+  .distance { color: #666; font-size: 13px; }
   .filter-bar { margin-bottom: 8px; display: flex; align-items: center; gap: 8px; font-size: 14px; flex-wrap: wrap; }
   .filter-link { display: inline-block; padding: 4px 14px; border-radius: 16px; background: #fff; border: 1px solid #ddd; color: #333; font-size: 13px; text-decoration: none; cursor: pointer; }
   .filter-link:hover { border-color: #1976d2; }
   .filter-link.active { background: #1976d2; color: #fff; border-color: #1976d2; }
-  .limit-bar { margin-bottom: 16px; display: flex; align-items: center; gap: 8px; font-size: 14px; }
-  .limit-link { display: inline-block; padding: 4px 14px; border-radius: 16px; background: #fff; border: 1px solid #ddd; color: #333; font-size: 13px; text-decoration: none; cursor: pointer; }
-  .limit-link:hover { border-color: #1976d2; }
-  .limit-link.active { background: #1976d2; color: #fff; border-color: #1976d2; }
   a { color: #1976d2; text-decoration: none; }
   a:hover { text-decoration: underline; }
   .overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 100; justify-content: center; align-items: center; }
@@ -61,6 +55,22 @@
   .overlay-card .bar-fill { height: 100%; background: #1976d2; border-radius: 3px; transition: width 0.3s; }
   .overlay-card .label { font-size: 14px; color: #666; margin-top: 8px; }
   .overlay-card .activity-name { font-weight: 500; color: #333; margin: 4px 0; font-size: 14px; }
+  th.sortable { cursor: pointer; user-select: none; }
+  th.sortable:hover { background: #eee; }
+  th.sortable::after { content: ' ⇅'; font-size: 10px; color: #bbb; }
+  th.sortable.asc::after { content: ' ▲'; color: #333; }
+  th.sortable.desc::after { content: ' ▼'; color: #333; }
+  .load-more-btn { display: block; width: 100%; padding: 12px; text-align: center; background: none; border: none; border-top: 1px solid #f0f0f0; color: #1976d2; font-size: 13px; cursor: pointer; font-weight: 500; }
+  .load-more-btn:hover { background: #f5f5f5; }
+  .empty-msg { padding: 24px; text-align: center; color: #999; }
+  .loading-msg { padding: 24px; text-align: center; color: #999; }
+  .section-search { padding: 8px 16px; display: flex; gap: 8px; align-items: center; background: #fafafa; border-bottom: 1px solid #f0f0f0; flex-wrap: wrap; }
+  .section-search label { font-size: 12px; color: #666; }
+  .section-search input[type="date"],
+  .section-search input[type="text"] { padding: 4px 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 12px; }
+  .section-search input[type="text"] { width: 160px; }
+  .section-search .search-reset { padding: 4px 10px; border: 1px solid #ddd; border-radius: 4px; background: #fff; font-size: 12px; cursor: pointer; color: #666; }
+  .section-search .search-reset:hover { border-color: #1976d2; color: #1976d2; }
 </style>
 </head>
 <body>
@@ -77,112 +87,14 @@
 
 <div class="filter-bar">
   <span>Type:</span>
-  <a href="/?sport_type=all&limit={{ limit }}" class="filter-link{% if current_sport == 'all' %} active{% endif %}">All</a>
+  <a href="/?sport_type=all" class="filter-link{% if current_sport == 'all' %} active{% endif %}">All</a>
   {% for t in sport_types %}
-    <a href="/?sport_type={{ t }}&limit={{ limit }}" class="filter-link{% if current_sport == t %} active{% endif %}">{{ t }}</a>
+    <a href="/?sport_type={{ t }}" class="filter-link{% if current_sport == t %} active{% endif %}">{{ t }}</a>
   {% endfor %}
 </div>
 
-<div class="limit-bar">
-  <span>Load:</span>
-  {% for n in [10, 30, 50, 100, 0] %}
-    {% if n == 0 %}
-      <a href="/?limit=0&sport_type={{ current_sport }}" class="limit-link{% if limit == 0 %} active{% endif %}">All</a>
-    {% else %}
-      <a href="/?limit={{ n }}&sport_type={{ current_sport }}" class="limit-link{% if limit == n %} active{% endif %}">{{ n }}</a>
-    {% endif %}
-  {% endfor %}
-</div>
-
-{% if modified %}
-<div class="block">
-  <div class="block-header modified">
-    <input type="checkbox" onchange="toggleAll(this, 'modified')">
-    <span>Modified after sync ({{ modified|length }})</span>
-    <button class="btn btn-warning" onclick="bulkAction('apply', 'modified')">Apply selected</button>
-  </div>
-  <div class="block-content" id="modified-table">
-    <table>
-      <tr>
-        <th class="row-select"></th><th>Date</th><th>Name</th><th>Type</th><th>Distance</th><th>Changes</th><th></th>
-      </tr>
-      {% for act in modified %}
-      <tr data-id="{{ act.id }}">
-        <td><input type="checkbox" class="row-cb modified-cb" value="{{ act.id }}"></td>
-        <td>{{ act.start_date[:10] }}</td>
-        <td>{{ act.name }}</td>
-        <td>{{ act.sport_type }}</td>
-        <td class="distance">{{ "%.1f"|format(act.distance / 1000) }} km</td>
-        <td>
-          {% if act.changes %}
-            {% if act.changes.name %}<span class="chip name" onclick="showDiff(this, '{{ act.changes.name.old | e }} → {{ act.changes.name.new | e }}')">name</span>{% endif %}
-            {% if act.changes.sport_type %}<span class="chip sport" onclick="showDiff(this, '{{ act.changes.sport_type.old }} → {{ act.changes.sport_type.new }}')">sport</span>{% endif %}
-            {% if act.changes.visibility %}<span class="chip visibility" onclick="showDiff(this, '{{ act.changes.visibility.old }} → {{ act.changes.visibility.new }}')">visibility</span>{% endif %}
-            {% if act.changes.track %}<span class="chip track">track</span>{% endif %}
-          {% endif %}
-        </td>
-        <td><button class="btn btn-warning" onclick="bulkAction('apply', [{{ act.id }}])">Apply</button></td>
-      </tr>
-      {% endfor %}
-    </table>
-  </div>
-</div>
-{% endif %}
-
-<div class="block">
-  <div class="block-header new">
-    <input type="checkbox" onchange="toggleAll(this, 'new')">
-    <span>New ({{ new|length }})</span>
-    <button class="btn btn-primary" onclick="bulkAction('sync', 'new')">Sync selected</button>
-  </div>
-  <div class="block-content" id="new-table">
-    {% if new %}
-    <table>
-      <tr>
-        <th class="row-select"></th><th>Date</th><th>Name</th><th>Type</th><th>Distance</th><th>Status</th><th></th>
-      </tr>
-      {% for act in new %}
-      <tr data-id="{{ act.id }}">
-        <td><input type="checkbox" class="row-cb new-cb" value="{{ act.id }}"></td>
-        <td>{{ act.start_date[:10] }}</td>
-        <td>{{ act.name }}</td>
-        <td>{{ act.sport_type }}</td>
-        <td class="distance">{{ "%.1f"|format(act.distance / 1000) }} km</td>
-        <td><span class="status">new</span></td>
-        <td><button class="btn btn-primary" onclick="bulkAction('sync', [{{ act.id }}])">Sync</button></td>
-      </tr>
-      {% endfor %}
-    </table>
-    {% else %}
-    <div style="padding: 24px; text-align: center; color: #999;">No new activities</div>
-    {% endif %}
-  </div>
-</div>
-
-<div class="block">
-  <div class="block-header synced" onclick="toggleCollapse(this)">
-    <span>Synced ({{ synced|length }})</span>
-    <span class="badge" id="synced-count">{{ synced|length }}</span>
-    <button class="btn btn-primary" onclick="event.stopPropagation(); verifySynced()" style="margin-left:auto">Verify</button>
-  </div>
-  <div class="block-content collapsed" id="synced-table">
-    {% if synced %}
-    <table>
-      <tr><th>Date</th><th>Name</th><th>Type</th><th>Komoot Tour</th><th>Synced at</th></tr>
-      {% for act in synced %}
-      <tr>
-        <td>{{ act.start_date[:10] }}</td>
-        <td>{{ act.name }}</td>
-        <td>{{ act.sport_type }}</td>
-        <td><a href="https://www.komoot.com/tour/{{ act.komoot_tour_id }}" target="_blank">{{ act.komoot_tour_id }}</a></td>
-        <td>{{ act.synced_at[:16] }}</td>
-      </tr>
-      {% endfor %}
-    </table>
-    {% else %}
-    <div style="padding: 24px; text-align: center; color: #999;">No synced activities yet</div>
-    {% endif %}
-  </div>
+<div id="app">
+  <div class="loading-msg" id="loading-indicator">Loading activities...</div>
 </div>
 
 <div id="diff-popup" class="diff-popup"></div>
@@ -197,24 +109,280 @@
 </div>
 
 <script>
+var SPORT_TYPE = '{{ current_sport }}';
+var PAGE_SIZE = 10;
+var allNew = [], allModified = [], allSynced = [], allUnsyncable = [];
+var shownNew = 0, shownModified = 0, shownSynced = 0, shownUnsyncable = 0;
+var app = document.getElementById('app');
+var filters = { new: { dateFrom: '', dateTo: '', name: '' }, modified: { dateFrom: '', dateTo: '', name: '' }, synced: { dateFrom: '', dateTo: '', name: '' }, unsyncable: { dateFrom: '', dateTo: '', name: '' } };
+
+function esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+function buildNewRow(act) {
+  return '<tr data-id="' + act.id + '">'
+    + '<td><input type="checkbox" class="row-cb new-cb" value="' + act.id + '"></td>'
+    + '<td>' + (act.start_date||'').slice(0,10) + '</td>'
+    + '<td>' + esc(act.name) + '</td>'
+    + '<td>' + esc(act.sport_type) + '</td>'
+    + '<td class="distance">' + (act.distance/1000).toFixed(1) + ' km</td>'
+    + '<td><span class="status">new</span></td>'
+    + '<td><input type="checkbox" class="media-cb new-media-cb" data-id="' + act.id + '"' + (act.sync_media ? ' checked' : '') + ' onchange="toggleSyncMedia(this)"></td>'
+    + '<td><button class="btn btn-primary" onclick="bulkAction(\'sync\',[' + act.id + '])">Sync</button></td>'
+    + '</tr>';
+}
+
+function buildModifiedRow(act) {
+  var chips = '';
+  if (act.changes) {
+    if (act.changes.name) chips += '<span class="chip name" onclick="showDiff(this,\'' + esc(act.changes.name.old||'') + ' → ' + esc(act.changes.name.new||'') + '\')">name</span>';
+    if (act.changes.sport_type) chips += '<span class="chip sport" onclick="showDiff(this,\'' + esc(act.changes.sport_type.old||'') + ' → ' + esc(act.changes.sport_type.new||'') + '\')">sport</span>';
+    if (act.changes.visibility) chips += '<span class="chip visibility" onclick="showDiff(this,\'' + esc(act.changes.visibility.old||'') + ' → ' + esc(act.changes.visibility.new||'') + '\')">visibility</span>';
+    if (act.changes.track) chips += '<span class="chip track">track</span>';
+  }
+  return '<tr data-id="' + act.id + '">'
+    + '<td><input type="checkbox" class="row-cb modified-cb" value="' + act.id + '"></td>'
+    + '<td>' + (act.start_date||'').slice(0,10) + '</td>'
+    + '<td>' + esc(act.name) + '</td>'
+    + '<td>' + esc(act.sport_type) + '</td>'
+    + '<td class="distance">' + (act.distance/1000).toFixed(1) + ' km</td>'
+    + '<td>' + chips + '</td>'
+    + '<td><input type="checkbox" class="media-cb modified-media-cb" data-id="' + act.id + '"' + (act.sync_media ? ' checked' : '') + ' onchange="toggleSyncMedia(this)"></td>'
+    + '<td><button class="btn btn-warning" onclick="bulkAction(\'apply\',[' + act.id + '])">Apply</button></td>'
+    + '</tr>';
+}
+
+function buildSyncedRow(act) {
+  return '<tr>'
+    + '<td>' + (act.start_date||'').slice(0,10) + '</td>'
+    + '<td>' + esc(act.name) + '</td>'
+    + '<td>' + esc(act.sport_type) + '</td>'
+    + '<td><a href="https://www.komoot.com/tour/' + act.komoot_tour_id + '" target="_blank">' + act.komoot_tour_id + '</a></td>'
+    + '<td>' + (act.synced_at||'').slice(0,16) + '</td>'
+    + '<td><input type="checkbox" class="media-cb synced-media-cb" data-id="' + act.id + '"' + (act.sync_media ? ' checked' : '') + ' onchange="toggleSyncMedia(this)"></td>'
+    + '</tr>';
+}
+
+function buildUnsyncableRow(act) {
+  var btn = '';
+  if (act.can_force_sync) {
+    btn = '<button class="btn btn-primary" onclick="bulkAction(\'sync\',[' + act.id + '])">Sync anyway</button>';
+  }
+  return '<tr>'
+    + '<td>' + (act.start_date||'').slice(0,10) + '</td>'
+    + '<td>' + esc(act.name) + '</td>'
+    + '<td>' + esc(act.sport_type) + '</td>'
+    + '<td class="distance">' + (act.distance/1000).toFixed(1) + ' km</td>'
+    + '<td style="color:#999;font-size:12px">' + esc(act.unsyncable_reason || 'Cannot sync') + '</td>'
+    + '<td>' + btn + '</td>'
+    + '</tr>';
+}
+
+function getFiltered(section) {
+  var arr = section === 'new' ? allNew : section === 'modified' ? allModified : section === 'unsyncable' ? allUnsyncable : allSynced;
+  var f = filters[section];
+  if (!f.dateFrom && !f.dateTo && !f.name) return arr;
+  var q = f.name.toLowerCase();
+  return arr.filter(function(a) {
+    var d = (a.start_date || '').slice(0, 10);
+    if (f.dateFrom && d < f.dateFrom) return false;
+    if (f.dateTo && d > f.dateTo) return false;
+    if (q && a.name.toLowerCase().indexOf(q) === -1) return false;
+    return true;
+  });
+}
+
+function onFilterChange(section) {
+  filters[section].dateFrom = document.getElementById(section + '-date-from').value;
+  filters[section].dateTo = document.getElementById(section + '-date-to').value;
+  filters[section].name = document.getElementById(section + '-name').value;
+  if (section === 'new') shownNew = 0;
+  else if (section === 'modified') shownModified = 0;
+  else if (section === 'unsyncable') shownUnsyncable = 0;
+  else shownSynced = 0;
+  var tbodyId = section + '-tbody';
+  var tbody = document.getElementById(tbodyId);
+  if (tbody) tbody.innerHTML = '';
+  showMore(section);
+}
+
+function resetFilter(section) {
+  filters[section] = { dateFrom: '', dateTo: '', name: '' };
+  var df = document.getElementById(section + '-date-from');
+  var dt = document.getElementById(section + '-date-to');
+  var nm = document.getElementById(section + '-name');
+  if (df) df.value = '';
+  if (dt) dt.value = '';
+  if (nm) nm.value = '';
+  onFilterChange(section);
+}
+
+function renderBlocks() {
+  var html = '';
+
+  if (allModified.length > 0) {
+    html += '<div class="block" id="modified-block">'
+      + '<div class="block-header modified">'
+      + '<input type="checkbox" onchange="toggleAll(this, \'modified\')">'
+      + '<span>Modified after sync (<span id="modified-count">0 / ' + allModified.length + '</span>)</span>'
+      + '<button class="btn btn-warning" onclick="bulkAction(\'apply\', \'modified\')">Apply selected</button>'
+      + '</div>'
+      + '<div class="section-search">'
+      + '<label>From <input type="date" id="modified-date-from" onchange="onFilterChange(\'modified\')"></label>'
+      + '<label>To <input type="date" id="modified-date-to" onchange="onFilterChange(\'modified\')"></label>'
+      + '<label>Name <input type="text" id="modified-name" placeholder="Search..." oninput="onFilterChange(\'modified\')"></label>'
+      + '<button class="search-reset" onclick="resetFilter(\'modified\')">Reset</button>'
+      + '</div>'
+      + '<div class="block-content" id="modified-table">'
+      + '<table><tr>'
+      + '<th class="row-select"></th><th class="sortable" onclick="sortTable(this, \'date\')">Date</th><th class="sortable" onclick="sortTable(this, \'name\')">Name</th><th>Type</th><th>Distance</th><th>Changes</th><th>Media<input type="checkbox" onchange="toggleAllMedia(this, \'modified\')"></th><th></th>'
+      + '</tr><tbody id="modified-tbody"></tbody></table>'
+      + '<button class="load-more-btn" id="modified-load-more" onclick="showMore(\'modified\')">Load more</button>'
+      + '</div></div>';
+  }
+
+  html += '<div class="block" id="new-block">'
+    + '<div class="block-header new">'
+    + '<input type="checkbox" onchange="toggleAll(this, \'new\')">'
+    + '<span>New (<span id="new-count">0 / ' + allNew.length + '</span>)</span>'
+    + '<button class="btn btn-primary" onclick="bulkAction(\'sync\', \'new\')">Sync selected</button>'
+    + '</div>'
+    + '<div class="section-search">'
+    + '<label>From <input type="date" id="new-date-from" onchange="onFilterChange(\'new\')"></label>'
+    + '<label>To <input type="date" id="new-date-to" onchange="onFilterChange(\'new\')"></label>'
+    + '<label>Name <input type="text" id="new-name" placeholder="Search..." oninput="onFilterChange(\'new\')"></label>'
+    + '<button class="search-reset" onclick="resetFilter(\'new\')">Reset</button>'
+    + '</div>'
+    + '<div class="block-content" id="new-table">'
+    + '<table><tr>'
+    + '<th class="row-select"></th><th class="sortable" onclick="sortTable(this, \'date\')">Date</th><th class="sortable" onclick="sortTable(this, \'name\')">Name</th><th>Type</th><th>Distance</th><th>Status</th><th>Media<input type="checkbox" onchange="toggleAllMedia(this, \'new\')"></th><th></th>'
+    + '</tr><tbody id="new-tbody"></tbody></table>'
+    + '<button class="load-more-btn" id="new-load-more" onclick="showMore(\'new\')">Load more</button>'
+    + '<div class="empty-msg" id="new-empty"' + (allNew.length > 0 ? ' style="display:none"' : '') + '>No new activities</div>'
+    + '</div></div>';
+
+  html += '<div class="block">'
+    + '<div class="block-header synced" onclick="toggleCollapse(this)">'
+    + '<span>Synced (<span id="synced-count">0 / ' + allSynced.length + '</span>)</span>'
+    + '<span class="badge" id="synced-badge">' + allSynced.length + '</span>'
+    + '<button class="btn btn-primary" onclick="event.stopPropagation(); verifySynced()" style="margin-left:auto">Verify</button>'
+    + '</div>'
+    + '<div class="section-search">'
+    + '<label>From <input type="date" id="synced-date-from" onclick="event.stopPropagation()" onchange="onFilterChange(\'synced\')"></label>'
+    + '<label>To <input type="date" id="synced-date-to" onclick="event.stopPropagation()" onchange="onFilterChange(\'synced\')"></label>'
+    + '<label>Name <input type="text" id="synced-name" placeholder="Search..." onclick="event.stopPropagation()" oninput="onFilterChange(\'synced\')"></label>'
+    + '<button class="search-reset" onclick="event.stopPropagation(); resetFilter(\'synced\')">Reset</button>'
+    + '</div>'
+    + '<div class="block-content collapsed" id="synced-table">'
+    + '<table><tr><th class="sortable" onclick="sortTable(this, \'date\')">Date</th><th class="sortable" onclick="sortTable(this, \'name\')">Name</th><th>Type</th><th>Komoot Tour</th><th>Synced at</th><th>Media<input type="checkbox" onchange="toggleAllMedia(this, \'synced\')"></th></tr>'
+    + '<tbody id="synced-tbody"></tbody></table>'
+    + '<button class="load-more-btn" id="synced-load-more" onclick="showMore(\'synced\')">Load more</button>'
+    + '<div class="empty-msg" id="synced-empty"' + (allSynced.length > 0 ? ' style="display:none"' : '') + '>No synced activities yet</div>'
+    + '</div></div>';
+
+  if (allUnsyncable.length > 0) {
+    html += '<div class="block">'
+      + '<div class="block-header" style="background:#fce4ec;cursor:pointer" onclick="toggleCollapse(this)">'
+      + '<span>Cannot sync (<span id="unsyncable-count">0 / ' + allUnsyncable.length + '</span>)</span>'
+      + '<span class="badge">' + allUnsyncable.length + '</span>'
+      + '</div>'
+      + '<div class="block-content collapsed" id="unsyncable-table">'
+      + '<table><tr><th class="sortable" onclick="sortTable(this, \'date\')">Date</th><th class="sortable" onclick="sortTable(this, \'name\')">Name</th><th>Type</th><th>Distance</th><th>Reason</th><th></th></tr>'
+      + '<tbody id="unsyncable-tbody"></tbody></table>'
+      + '<button class="load-more-btn" id="unsyncable-load-more" onclick="showMore(\'unsyncable\')">Load more</button>'
+      + '</div></div>';
+  }
+
+  app.innerHTML = html;
+
+  showMore('new');
+  showMore('modified');
+  showMore('synced');
+  showMore('unsyncable');
+}
+
+function showMore(section) {
+  var arr = getFiltered(section);
+  var tbodyId = section + '-tbody';
+  var btnId = section + '-load-more';
+  var countId = section + '-count';
+  var count = section === 'new' ? shownNew : section === 'modified' ? shownModified : section === 'unsyncable' ? shownUnsyncable : shownSynced;
+
+  var tbody = document.getElementById(tbodyId);
+  var btn = document.getElementById(btnId);
+  if (!tbody || !btn) return;
+
+  var end = Math.min(count + PAGE_SIZE, arr.length);
+  var html = '';
+  for (var i = count; i < end; i++) {
+    if (section === 'new') html += buildNewRow(arr[i]);
+    else if (section === 'modified') html += buildModifiedRow(arr[i]);
+    else if (section === 'unsyncable') html += buildUnsyncableRow(arr[i]);
+    else html += buildSyncedRow(arr[i]);
+  }
+  tbody.insertAdjacentHTML('beforeend', html);
+
+  if (section === 'new') shownNew = end;
+  else if (section === 'modified') shownModified = end;
+  else if (section === 'unsyncable') shownUnsyncable = end;
+  else shownSynced = end;
+
+  var totalAll = section === 'new' ? allNew.length : section === 'modified' ? allModified.length : section === 'unsyncable' ? allUnsyncable.length : allSynced.length;
+  var countEl = document.getElementById(countId);
+  if (countEl) countEl.textContent = end + ' / ' + totalAll;
+
+  if (end >= arr.length) {
+    btn.style.display = 'none';
+  } else {
+    btn.textContent = 'Load more (' + end + ' / ' + arr.length + ')';
+    btn.style.display = '';
+  }
+
+  var emptyId = section + '-empty';
+  var emptyEl = document.getElementById(emptyId);
+  if (emptyEl) emptyEl.style.display = arr.length === 0 ? 'block' : 'none';
+}
+
+fetch('/api/activities?sport_type=' + encodeURIComponent(SPORT_TYPE))
+  .then(function(r) { return r.json(); })
+  .then(function(data) {
+    allNew = data.new || [];
+    allModified = data.modified || [];
+    allSynced = data.synced || [];
+    allUnsyncable = data.unsyncable || [];
+    renderBlocks();
+  })
+  .catch(function() {
+    app.innerHTML = '<div class="empty-msg">Failed to load activities</div>';
+  });
+
 function toggleAll(master, block) {
-  document.querySelectorAll('.' + block + '-cb').forEach(cb => cb.checked = master.checked);
+  document.querySelectorAll('.' + block + '-cb').forEach(function(cb) { cb.checked = master.checked; });
+}
+
+function toggleAllMedia(master, block) {
+  document.querySelectorAll('.' + block + '-media-cb').forEach(function(cb) {
+    cb.checked = master.checked;
+    toggleSyncMedia(cb);
+  });
 }
 
 function getSelected(block) {
-  return Array.from(document.querySelectorAll('.' + block + '-cb:checked')).map(cb => parseInt(cb.value));
+  return Array.from(document.querySelectorAll('.' + block + '-cb:checked')).map(function(cb) { return parseInt(cb.value); });
 }
 
 function toggleCollapse(header) {
-  const content = header.nextElementSibling;
+  var block = header.closest('.block');
+  var content = block.querySelector('.block-content');
   content.classList.toggle('collapsed');
 }
 
 function showDiff(el, text) {
-  const popup = document.getElementById('diff-popup');
+  var popup = document.getElementById('diff-popup');
   popup.textContent = text;
   popup.classList.add('show');
-  const rect = el.getBoundingClientRect();
+  var rect = el.getBoundingClientRect();
   popup.style.left = rect.left + 'px';
   popup.style.top = (rect.bottom + 4) + 'px';
 }
@@ -233,18 +401,18 @@ function bulkAction(action, ids) {
 
   showProgress(action, ids.length, 0, '');
 
-  const form = new FormData();
-  ids.forEach(id => form.append('ids', id));
+  var form = new FormData();
+  ids.forEach(function(id) { form.append('ids', id); });
 
   fetch('/' + action, { method: 'POST', body: form })
-    .then(r => r.json())
-    .then(data => {
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
       pollJob(data.job_id);
     });
 }
 
 function showProgress(action, total, current, name) {
-  const overlay = document.getElementById('progress-overlay');
+  var overlay = document.getElementById('progress-overlay');
   document.getElementById('progress-title').textContent = action === 'sync' ? 'Syncing to Komoot...' : 'Applying changes...';
   document.getElementById('progress-count').textContent = current + ' / ' + total;
   document.getElementById('progress-bar').style.width = total > 0 ? (current / total * 100) + '%' : '0%';
@@ -253,10 +421,10 @@ function showProgress(action, total, current, name) {
 }
 
 function pollJob(jobId) {
-  const interval = setInterval(() => {
+  var interval = setInterval(function() {
     fetch('/jobs/' + jobId)
-      .then(r => r.json())
-      .then(job => {
+      .then(function(r) { return r.json(); })
+      .then(function(job) {
         if (job.status === 'running') {
           if (job.type === 'verify') {
             document.getElementById('progress-title').textContent = 'Verifying synced activities...';
@@ -265,12 +433,17 @@ function pollJob(jobId) {
         } else if (job.status === 'completed') {
           clearInterval(interval);
           if (job.type === 'verify') {
-            const missing = (job.result && job.result.missing && job.result.missing.length) || 0;
-            showProgress('verify', job.total, job.total, missing + ' missing on Komoot, will re-appear as "New"');
-            setTimeout(() => location.reload(), 1500);
+            var missing = (job.result && job.result.missing && job.result.missing.length) || 0;
+            var mediaUploaded = (job.result && job.result.results && job.result.results.length) || 0;
+            var msg = '';
+            if (missing > 0) msg += missing + ' missing on Komoot, will re-appear as "New"';
+            if (mediaUploaded > 0) msg += (msg ? ', ' : '') + mediaUploaded + ' media uploaded';
+            if (!msg) msg = 'All good!';
+            showProgress('verify', job.total, job.total, msg);
+            setTimeout(function() { location.reload(); }, 1500);
           } else {
             showProgress(job.type, job.total, job.total, 'Done!');
-            setTimeout(() => location.reload(), 600);
+            setTimeout(function() { location.reload(); }, 600);
           }
         } else if (job.status === 'error') {
           clearInterval(interval);
@@ -280,8 +453,45 @@ function pollJob(jobId) {
   }, 1000);
 }
 
+function toggleSyncMedia(cb) {
+  var id = cb.dataset.id;
+  var form = new FormData();
+  form.append('sync_media', cb.checked ? '1' : '0');
+  fetch('/activities/' + id + '/sync-media', { method: 'POST', body: form })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (!data.ok) cb.checked = !cb.checked;
+    })
+    .catch(function() { cb.checked = !cb.checked; });
+}
+
+function sortTable(th, type) {
+  var table = th.closest('table');
+  var tbody = table.tBodies[0];
+  var rows = Array.from(tbody.querySelectorAll('tr[data-id]'));
+  if (!rows.length) return;
+  var colIdx = Array.from(th.parentNode.children).indexOf(th);
+  var asc = th.classList.contains('asc');
+
+  th.parentNode.querySelectorAll('th.sortable').forEach(function(h) { h.classList.remove('asc', 'desc'); });
+  th.classList.add(asc ? 'desc' : 'asc');
+
+  rows.sort(function(a, b) {
+    var va = (a.children[colIdx] ? a.children[colIdx].textContent.trim() : '') || '';
+    var vb = (b.children[colIdx] ? b.children[colIdx].textContent.trim() : '') || '';
+    if (type === 'date') {
+      va = va.split('-').join('');
+      vb = vb.split('-').join('');
+    }
+    var cmp = va.localeCompare(vb, undefined, { numeric: true });
+    return asc ? -cmp : cmp;
+  });
+
+  rows.forEach(function(r) { tbody.appendChild(r); });
+}
+
 function verifySynced() {
-  const overlay = document.getElementById('progress-overlay');
+  var overlay = document.getElementById('progress-overlay');
   document.getElementById('progress-title').textContent = 'Verifying synced activities...';
   document.getElementById('progress-count').textContent = '...';
   document.getElementById('progress-bar').style.width = '0%';
@@ -289,13 +499,13 @@ function verifySynced() {
   overlay.classList.add('show');
 
   fetch('/verify', { method: 'POST' })
-    .then(r => r.json())
-    .then(data => {
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
       if (data.job_id) {
         pollJob(data.job_id);
       } else {
         document.getElementById('progress-title').textContent = data.message || 'Nothing to verify';
-        setTimeout(() => location.reload(), 1000);
+        setTimeout(function() { location.reload(); }, 1000);
       }
     });
 }

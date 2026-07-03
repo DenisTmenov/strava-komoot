@@ -29,7 +29,7 @@ STRAVA_TO_KOMOOT_SPORT: dict[str, str] = {
 }
 
 STRAVA_VIS_TO_KOMOOT: dict[str, str] = {
-    "everyone": PrivacyStatus.PUBLIC,
+    "everyone": PrivacyStatus.FRIENDS,
     "followers_only": PrivacyStatus.FRIENDS,
     "only_me": PrivacyStatus.PRIVATE,
 }

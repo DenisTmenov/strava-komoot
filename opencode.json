@@ -1,6 +1,14 @@
 {
   "$schema": "https://opencode.ai/config.json",
-  "model": "opencode/deepseek-v4-flash-free",
-  "small_model": "opencode/deepseek-v4-flash-free",
+  "model": "opencode/mimo-v2.5-free",
+  "small_model": "opencode/mimo-v2.5-free",
+  "agent": {
+    "build": {
+      "model": "opencode/mimo-v2.5-free"
+    },
+    "plan": {
+      "model": "opencode/mimo-v2.5-free"
+    }
+  },
   "instructions": [".opencode/CONVENTIONS.md"]
 }

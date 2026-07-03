@@ -41,6 +41,7 @@ class StravaActivity:
     moving_time: int
     total_elevation_gain: float
     visibility: str | None
+    start_latlng: list[float] | None = None
 
 
 class StravaSource:
@@ -69,7 +70,8 @@ class StravaSource:
         return self._client.authorization_url(
             client_id=int(settings.strava_client_id),
             redirect_uri="http://localhost:8000/auth/strava/callback",
-            scope=["read", "activity:read_all"],
+            approval_prompt="force",
+            scope=["read", "activity:read_all", "activity:write"],
         )
 
     def handle_callback(self, code: str) -> None:
@@ -136,6 +138,7 @@ class StravaSource:
                     moving_time=int(a.moving_time) if a.moving_time else 0,
                     total_elevation_gain=elev,
                     visibility=a.visibility,
+                    start_latlng=list(a.start_latlng) if a.start_latlng else None,
                 )
             )
             if limit and len(activities) >= limit:
@@ -151,7 +154,7 @@ class StravaSource:
         return sorted(types)
 
     def get_photos(self, activity_id: int) -> list[StravaMedia]:
-        url = f"https://www.strava.com/api/v3/activities/{activity_id}/photos?photo_sources=true&size=600"
+        url = f"https://www.strava.com/api/v3/activities/{activity_id}/photos?photo_sources=true&size=4096"
         headers = {"Authorization": f"Bearer {self._client.access_token}"}
         resp = self._session.get(url, headers=headers, timeout=30)
         if resp.status_code != 200:
@@ -186,3 +189,9 @@ class StravaSource:
             types=["latlng", "time", "altitude", "heartrate", "cadence"],
             resolution="high",
         )
+
+    def update_activity_name(self, activity_id: int, name: str) -> None:
+        url = f"https://www.strava.com/api/v3/activities/{activity_id}"
+        headers = {"Authorization": f"Bearer {self._client.access_token}"}
+        resp = self._session.put(url, headers=headers, json={"name": name}, timeout=30)
+        resp.raise_for_status()

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import logging
 import threading
 import uuid
@@ -56,6 +57,7 @@ class SyncEngine:
                         entry = self._activity_to_dict(a)
                         entry["changes"] = diff
                         entry["komoot_tour_id"] = record["komoot_tour_id"]
+                        entry["sync_media"] = bool(record["sync_media"])
                         result["modified"].append(entry)
                         continue
                 diff = activity_diff(a, snapshot)
@@ -63,16 +65,44 @@ class SyncEngine:
                     entry = self._activity_to_dict(a)
                     entry["changes"] = diff
                     entry["komoot_tour_id"] = record["komoot_tour_id"]
+                    entry["sync_media"] = bool(record["sync_media"])
                     result["modified"].append(entry)
                 else:
                     entry = self._activity_to_dict(a)
                     entry["komoot_tour_id"] = record["komoot_tour_id"]
                     entry["synced_at"] = record["synced_at"]
+                    entry["sync_media"] = bool(record["sync_media"])
                     result["synced"].append(entry)
             else:
                 result["new"].append(self._activity_to_dict(a))
 
         return result
+
+    def _build_cache_key(self, sport_type: str | None) -> str:
+        return f"activities:{sport_type or 'all'}"
+
+    def _build_sport_types_cache_key(self) -> str:
+        return "sport_types"
+
+    def list_activities_cached(self, sport_type: str | None = None, ttl: int = 300) -> dict:
+        cache_key = self._build_cache_key(sport_type)
+        cached = self._repo.get_cached_activities(cache_key, ttl_seconds=ttl)
+
+        if cached is None:
+            raw = self.strava.list_activities(sport_type=sport_type)
+            cached = [self._activity_to_dict(a) for a in raw]
+            self._repo.set_cached_activities(cache_key, cached)
+
+        return {"activities": cached, "total": len(cached)}
+
+    def get_sport_types_cached(self, ttl: int = 300) -> list[str]:
+        cache_key = self._build_sport_types_cache_key()
+        cached = self._repo.get_cached_sport_types(cache_key, ttl_seconds=ttl)
+        if cached is not None:
+            return cached
+        types = self.strava.get_sport_types()
+        self._repo.set_cached_activities(cache_key, [], sport_types=types)
+        return types
 
     def _activity_to_dict(self, a) -> dict:
         return {
@@ -84,6 +114,8 @@ class SyncEngine:
             "moving_time": a.moving_time,
             "total_elevation_gain": a.total_elevation_gain,
             "visibility": a.visibility,
+            "sync_media": False,
+            "has_gps": bool(a.start_latlng),
         }
 
     def sync(self, activity_ids: list[int]) -> dict:
@@ -121,13 +153,28 @@ class SyncEngine:
 
         return {"results": results}
 
+    def _compute_media_hash(self, photos: list) -> str | None:
+        if not photos:
+            return None
+        raw = ",".join(sorted(p.unique_id for p in photos))
+        return hashlib.sha256(raw.encode()).hexdigest()
+
     def _upload_activity_media(self, activity, tour_id: int) -> dict:
+        if not self._repo.get_sync_media(activity.id):
+            return {"photo": 0, "video": 0, "skipped": True}
+
         media_results = {"photo": 0, "video": 0}
         try:
             photos = self.strava.get_photos(activity.id)
         except Exception as e:
             logger.warning("Failed to get photos for %s: %s", activity.id, e)
             return media_results
+
+        current_hash = self._compute_media_hash(photos)
+        stored_hash = self._repo.get_media_hash(activity.id)
+        if current_hash and current_hash == stored_hash:
+            return {"photo": 0, "video": 0, "unchanged": True}
+
         for photo in photos:
             try:
                 data = self.strava.download_media(photo)
@@ -146,6 +193,9 @@ class SyncEngine:
                     media_results[photo.media_type] += 1
             except Exception as e:
                 logger.warning("Failed to upload %s for %s: %s", photo.media_type, activity.id, e)
+
+        if current_hash:
+            self._repo.update_media_hash(activity.id, current_hash)
         return media_results
 
     def apply(self, activity_ids: list[int]) -> dict:
@@ -355,17 +405,55 @@ class SyncEngine:
 
     def _verify_with_progress(self, job_id: str, activity_ids: list[int]) -> dict:
         results = []
+        missing = []
+        activities = {a.id: a for a in self.strava.list_activities() if a.id in activity_ids}
+
         for idx, aid in enumerate(activity_ids):
             record = self._repo.get(aid)
-            name = str(aid)
+            activity = activities.get(aid)
+            name = activity.name if activity else str(aid)
             self._jobs[job_id]["current"] = idx
             self._jobs[job_id]["current_name"] = name
+
             if record is None:
                 continue
+
             exists = self.komoot.tour_exists(record["komoot_tour_id"])
             if not exists:
                 self._repo.delete(aid)
-                results.append({"id": aid, "komoot_tour_id": record["komoot_tour_id"]})
+                missing.append({"id": aid, "komoot_tour_id": record["komoot_tour_id"]})
+                continue
+
+            if activity and self._repo.get_sync_media(aid):
+                media_result = self._upload_activity_media(activity, record["komoot_tour_id"])
+                if media_result and not media_result.get("skipped") and not media_result.get("unchanged"):
+                    results.append({"id": aid, "status": "media_uploaded", "media": media_result})
+
+        self._jobs[job_id]["current"] = len(activity_ids)
+        return {"results": results, "missing": missing}
+
+    def _sync_media_with_progress(self, job_id: str, activity_ids: list[int]) -> dict:
+        activities = {a.id: a for a in self.strava.list_activities() if a.id in activity_ids}
+        results = []
+
+        for idx, aid in enumerate(activity_ids):
+            activity = activities.get(aid)
+            name = activity.name if activity else str(aid)
+            self._jobs[job_id]["current"] = idx
+            self._jobs[job_id]["current_name"] = name
+
+            record = self._repo.get(aid)
+            if record is None:
+                results.append({"id": aid, "status": "error", "error": "not synced yet"})
+                continue
+
+            if activity is None:
+                results.append({"id": aid, "status": "error", "error": "activity not found"})
+                continue
+
+            media_result = self._upload_activity_media(activity, record["komoot_tour_id"])
+            results.append({"id": aid, "status": "uploaded", "media": media_result})
+
         self._jobs[job_id]["current"] = len(activity_ids)
         return {"results": results, "missing": results}
 

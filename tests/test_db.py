@@ -1,13 +1,18 @@
 import json
+import os
 from pathlib import Path
 
 from strava_komoot.db import SyncRepo
+
+_TEST_DB = Path("/tmp/test_strava_komoot.db")
 
 
 class TestSyncRepo:
     @staticmethod
     def _make_repo():
-        return SyncRepo(db_path=Path("/tmp/test_strava_komoot.db"))
+        if _TEST_DB.exists():
+            os.unlink(_TEST_DB)
+        return SyncRepo(db_path=_TEST_DB)
 
     def test_get_missing(self):
         repo = self._make_repo()
@@ -51,3 +56,40 @@ class TestSyncRepo:
         repo.upsert(2, 200, "synced", {})
         items = repo.list_all()
         assert len(items) == 2
+
+    def test_set_sync_media_pending_for_new_activity(self):
+        repo = self._make_repo()
+        repo.set_sync_media(999, True)
+        assert repo.get_sync_media(999) is True
+
+    def test_set_sync_media_pending_false(self):
+        repo = self._make_repo()
+        repo.set_sync_media(999, False)
+        assert repo.get_sync_media(999) is False
+
+    def test_set_sync_media_existing_row(self):
+        repo = self._make_repo()
+        repo.upsert(1, 100, "synced", {"name": "Test"})
+        repo.set_sync_media(1, True)
+        assert repo.get_sync_media(1) is True
+        record = repo.get(1)
+        assert record["sync_media"] == 1
+
+    def test_upsert_preserves_pending_media(self):
+        repo = self._make_repo()
+        repo.set_sync_media(42, True)
+        repo.upsert(42, 200, "synced", {"name": "Test"})
+        assert repo.get_sync_media(42) is True
+        record = repo.get(42)
+        assert record["sync_media"] == 1
+
+    def test_pop_pending_media(self):
+        repo = self._make_repo()
+        repo.set_sync_media(777, True)
+        val = repo.pop_pending_media(777)
+        assert val is True
+        assert repo.pop_pending_media(777) is None
+
+    def test_get_sync_media_defaults_false(self):
+        repo = self._make_repo()
+        assert repo.get_sync_media(999) is False

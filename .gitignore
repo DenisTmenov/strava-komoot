@@ -6,3 +6,9 @@ __pycache__/
 *.egg-info/
 .pytest_cache/
 .DS_Store
+strava_all_activities.csv
+strava_rename.csv
+rename_tasks.json
+frontend/
+tmp/
+ARCHITECTURE_REVIEW.md
