@@ -9,7 +9,6 @@ dependencies = [
     "jinja2>=3.1",
     "stravalib>=2.3",
     "gpxpy>=1.6",
-    "kompy>=0.0.12",
     "pydantic-settings>=2.7",
     "python-dotenv>=1.0",
     "python-multipart>=0.0.32",
@@ -28,3 +27,6 @@ dev = ["strava-komoot[dev]"]
 
 [tool.uv.sources]
 strava-sync-core = { path = "../strava-sync-core", editable = true }
+
+[tool.setuptools.packages.find]
+where = ["src"]
