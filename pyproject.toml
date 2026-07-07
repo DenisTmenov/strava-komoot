@@ -14,6 +14,7 @@ dependencies = [
     "python-dotenv>=1.0",
     "python-multipart>=0.0.32",
     "Pillow>=11.0",
+    "strava-sync-core",
 ]
 
 [project.optional-dependencies]
@@ -24,3 +25,6 @@ dev = [
 
 [dependency-groups]
 dev = ["strava-komoot[dev]"]
+
+[tool.uv.sources]
+strava-sync-core = { path = "../strava-sync-core", editable = true }

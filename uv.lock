@@ -965,6 +965,7 @@ dependencies = [
     { name = "pydantic-settings" },
     { name = "python-dotenv" },
     { name = "python-multipart" },
+    { name = "strava-sync-core" },
     { name = "stravalib" },
     { name = "uvicorn", extra = ["standard"] },
 ]
@@ -992,6 +993,7 @@ requires-dist = [
     { name = "python-dotenv", specifier = ">=1.0" },
     { name = "python-multipart", specifier = ">=0.0.32" },
     { name = "responses", marker = "extra == 'dev'", specifier = ">=0.25" },
+    { name = "strava-sync-core", editable = "../strava-sync-core" },
     { name = "stravalib", specifier = ">=2.3" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.34" },
 ]
@@ -999,6 +1001,33 @@ provides-extras = ["dev"]
 
 [package.metadata.requires-dev]
 dev = [{ name = "strava-komoot", extras = ["dev"] }]
+
+[[package]]
+name = "strava-sync-core"
+version = "0.1.0"
+source = { editable = "../strava-sync-core" }
+dependencies = [
+    { name = "gpxpy" },
+    { name = "pillow" },
+    { name = "pydantic-settings" },
+    { name = "python-dotenv" },
+    { name = "requests" },
+    { name = "stravalib" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "gpxpy", specifier = ">=1.6" },
+    { name = "kompy", marker = "extra == 'kompy'", specifier = ">=0.0.12" },
+    { name = "pillow", specifier = ">=11.0" },
+    { name = "pydantic-settings", specifier = ">=2.7" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
+    { name = "python-dotenv", specifier = ">=1.0" },
+    { name = "requests", specifier = ">=2.31" },
+    { name = "responses", marker = "extra == 'dev'", specifier = ">=0.25" },
+    { name = "stravalib", specifier = ">=2.3" },
+]
+provides-extras = ["kompy", "dev"]
 
 [[package]]
 name = "stravalib"

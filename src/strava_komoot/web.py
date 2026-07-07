@@ -8,8 +8,8 @@ from pathlib import Path
 from starlette.responses import RedirectResponse
 
 from strava_komoot.config import settings
-from strava_komoot.sync import SyncEngine
-from strava_komoot.strava import StravaSource
+from strava_sync.sync import SyncEngine
+from strava_sync.strava import StravaSource
 
 app = FastAPI(title="Strava → Komoot Sync")
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
