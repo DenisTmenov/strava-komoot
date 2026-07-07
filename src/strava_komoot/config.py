@@ -14,32 +14,49 @@ _BW_ITEMS = {
 }
 
 
-def _bw_status() -> str:
+def _bw(args: list[str], session: str | None = None, timeout: int = 10) -> str | None:
+    """Run a bw CLI command. Returns stdout or None on failure."""
+    env = os.environ.copy()
+    if session:
+        env["BW_SESSION"] = session
     try:
-        raw = subprocess.check_output(["bw", "status"], timeout=5, stderr=subprocess.DEVNULL)
-        return json.loads(raw).get("status", "unknown")
+        return subprocess.check_output(
+            ["bw", *args],
+            timeout=timeout,
+            stderr=subprocess.DEVNULL,
+            env=env,
+        ).decode().strip()
     except Exception:
-        return "unavailable"
+        return None
 
 
-def _load_from_bitwarden() -> dict[str, str]:
-    """Try to pull missing credentials from Bitwarden."""
+def _bw_unlock_interactive() -> str | None:
+    """Prompt user for master password and return session token."""
+    print("\n🔐 Bitwarden is locked. Enter master password to unlock:")
+    try:
+        session = subprocess.check_output(
+            ["bw", "unlock", "--raw"],
+            timeout=60,
+            stderr=subprocess.DEVNULL,
+        ).decode().strip()
+        return session if session else None
+    except Exception:
+        return None
+
+
+def _load_from_bitwarden(session: str | None = None) -> dict[str, str]:
+    """Pull credentials from Bitwarden."""
     result: dict[str, str] = {}
     for field, (item, fname) in _BW_ITEMS.items():
+        raw = _bw(["get", "item", item], session=session)
+        if not raw:
+            continue
         try:
-            raw = subprocess.check_output(
-                ["bw", "get", "item", item],
-                timeout=10,
-                stderr=subprocess.DEVNULL,
-            )
             data = json.loads(raw)
-            value = ""
             for f in data.get("fields", []):
-                if f.get("name") == fname:
-                    value = f.get("value", "")
+                if f.get("name") == fname and f.get("value"):
+                    result[field] = f["value"]
                     break
-            if value:
-                result[field] = value
         except Exception:
             pass
     return result
@@ -56,28 +73,42 @@ class Settings(BaseSettings):
 
 settings = Settings()
 
-# Fill empty fields from Bitwarden (best-effort, no error if bw is locked/missing).
+# Try to fill empty fields from Bitwarden.
 if not all([settings.strava_client_id, settings.strava_client_secret,
             settings.komoot_email, settings.komoot_password]):
-    bw = _load_from_bitwarden()
-    if not settings.strava_client_id and bw.get("strava_client_id"):
-        settings.strava_client_id = bw["strava_client_id"]
-    if not settings.strava_client_secret and bw.get("strava_client_secret"):
-        settings.strava_client_secret = bw["strava_client_secret"]
-    if not settings.komoot_email and bw.get("komoot_email"):
-        settings.komoot_email = bw["komoot_email"]
-    if not settings.komoot_password and bw.get("komoot_password"):
-        settings.komoot_password = bw["komoot_password"]
 
+    bw_status_raw = _bw(["status"], timeout=5)
+    bw_status = "unavailable"
+    if bw_status_raw:
+        try:
+            bw_status = json.loads(bw_status_raw).get("status", "unknown")
+        except Exception:
+            pass
+
+    session = None
+    if bw_status == "locked":
+        session = _bw_unlock_interactive()
+        if session:
+            bw_status = "unlocked"
+    elif bw_status == "unlocked":
+        # Already unlocked — BW_SESSION may be in env.
+        session = os.environ.get("BW_SESSION")
+
+    if bw_status in ("unlocked", "locked") and session:
+        bw = _load_from_bitwarden(session)
+        for key in ("strava_client_id", "strava_client_secret", "komoot_email", "komoot_password"):
+            if not getattr(settings, key) and bw.get(key):
+                setattr(settings, key, bw[key])
+
+    # Final status.
     if not all([settings.strava_client_id, settings.strava_client_secret,
                 settings.komoot_email, settings.komoot_password]):
-        bw_st = _bw_status()
-        if bw_st == "locked":
-            print("⚠  Bitwarden is locked. Run 'bw unlock' to load credentials automatically.")
-        elif bw_st == "unauthenticated":
-            print("⚠  Bitwarden is not logged in. Run 'bw login' first.")
-        elif bw_st == "unavailable":
-            print("⚠  Bitwarden CLI (bw) not found. Create .env file with credentials.")
+        if bw_status == "locked":
+            print("⚠  Bitwarden unlock failed or cancelled.")
+        elif bw_status == "unauthenticated":
+            print("⚠  Bitwarden not logged in. Run 'bw login' first.")
+        elif bw_status == "unavailable":
+            print("⚠  Bitwarden CLI not found. Create .env file with credentials.")
         else:
             print("⚠  Some credentials missing. Check .env or Bitwarden.")
 
